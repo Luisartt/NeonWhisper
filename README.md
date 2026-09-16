@@ -19,6 +19,7 @@
 - **Dos modos**: *Iniciar / detener* (presionas una vez para hablar y otra para pegar) o *Mantener presionado* (walkie-talkie).
 - **Pega automáticamente** donde está tu cursor y después restaura lo que tenías en el portapapeles.
 - **Barra flotante neón** con las ondas de tu voz en tiempo real, cronómetro y botón para cancelar (`Esc` también cancela).
+- **Barra flotante a tu gusto** (Ajustes → Barra flotante): 3 diseños (*Neón*, *Cristal* y *Sutil*, negro con tonos blancos), tamaño, transparencia del fondo y opacidad, con vista previa en pantalla.
 - **Sonidos** al empezar y terminar de grabar, con volumen ajustable.
 - **Historial** con búsqueda, copiar, borrar y exportar a `.txt`.
 - **Whisper large-v3-turbo** con [faster-whisper](https://github.com/SYSTRAN/faster-whisper): en una GPU NVIDIA transcribe ~9 s de audio en ~0.4 s. Si no hay GPU, usa el CPU automáticamente.

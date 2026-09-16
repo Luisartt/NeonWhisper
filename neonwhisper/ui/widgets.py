@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import (
-    QBrush, QColor, QConicalGradient, QCursor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath,
+    QBrush, QColor, QConicalGradient, QCursor, QFont, QFontMetrics, QIcon, QLinearGradient, QPainter, QPainterPath,
     QPen, QPixmap, QRadialGradient,
 )
 from PySide6.QtWidgets import (
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from neonwhisper.hotkeys import pretty_parts
 from neonwhisper.ui import theme as T
+from neonwhisper.ui.overlay_styles import STYLES, paint_pill
 
 
 # --- Íconos -------------------------------------------------------------------
@@ -277,18 +278,22 @@ class MicOrb(QWidget):
 
 # --- Barras de voz ------------------------------------------------------------
 class WaveBars(QWidget):
-    BAR_W, GAP = 4.0, 3.0
-
     def __init__(self, level_source: Callable[[], float], height: int = 56):
         super().__init__()
         self.level_source = level_source
         self.mode = "idle"  # idle | recording | processing
+        self.stops: tuple[tuple[float, str], ...] = ((0, T.BLUE), (0.6, T.CYAN), (1, T.ICE))
+        self.bar_w, self.gap = 4.0, 3.0
         self.setMinimumHeight(height)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._history: deque[float] = deque([0.0] * 160, maxlen=160)
         self._t0 = time.monotonic()
         self._timer = QTimer(self, interval=33, timeout=self._tick)
         self._timer.start()
+
+    def set_style(self, stops: tuple[tuple[float, str], ...], bar_w: float, gap: float) -> None:
+        self.stops, self.bar_w, self.gap = stops, max(1.5, bar_w), max(1.5, gap)
+        self.update()
 
     def set_mode(self, mode: str) -> None:
         if mode == "recording" and self.mode != "recording":
@@ -305,16 +310,16 @@ class WaveBars(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        n = max(1, int((w + self.GAP) // (self.BAR_W + self.GAP)))
-        x0 = (w - (n * self.BAR_W + (n - 1) * self.GAP)) / 2
+        bw, gap = self.bar_w, self.gap
+        n = max(1, int((w + gap) // (bw + gap)))
+        x0 = (w - (n * bw + (n - 1) * gap)) / 2
         t = time.monotonic() - self._t0
         values = list(self._history)[-n:]
         values = [0.0] * (n - len(values)) + values
 
         grad = QLinearGradient(0, 0, w, 0)
-        grad.setColorAt(0, QColor(T.BLUE))
-        grad.setColorAt(0.6, QColor(T.CYAN))
-        grad.setColorAt(1, QColor(T.ICE))
+        for pos, color in self.stops:
+            grad.setColorAt(pos, QColor(color))
         p.setPen(Qt.PenStyle.NoPen)
         mid = h / 2
         for i in range(n):
@@ -327,11 +332,11 @@ class WaveBars(QWidget):
             else:
                 v = 0.03 + 0.03 * (0.5 + 0.5 * math.sin(t * 1.5 + i * 0.25))
                 alpha = 0.35
-            bh = max(self.BAR_W, v * (h - 4))
-            x = x0 + i * (self.BAR_W + self.GAP)
+            bh = max(bw, v * (h - 4))
+            x = x0 + i * (bw + gap)
             p.setOpacity(alpha)
             p.setBrush(QBrush(grad))
-            p.drawRoundedRect(QRectF(x, mid - bh / 2, self.BAR_W, bh), self.BAR_W / 2, self.BAR_W / 2)
+            p.drawRoundedRect(QRectF(x, mid - bh / 2, bw, bh), bw / 2, bw / 2)
         p.setOpacity(1.0)
 
 
@@ -511,3 +516,98 @@ class GlyphLabel(QLabel):
 
     def set_color(self, glyph: str, color: str, px: int = 18) -> None:
         self.setPixmap(glyph_pixmap(glyph, color, px))
+
+
+# --- Selector de diseño de la barra flotante --------------------------------------
+class OverlayStyleCard(QAbstractButton):
+    """Tarjeta con una miniatura del diseño sobre un fondo mixto, para que se note la transparencia."""
+
+    def __init__(self, key: str, settings):
+        super().__init__()
+        self.look = STYLES[key]
+        self.settings = settings
+        self.setCheckable(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.setFixedHeight(164)
+        self.setMinimumWidth(180)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setToolTip(f"{self.look.name} · {self.look.description}")
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        look, s = self.look, self.settings
+        checked, hover = self.isChecked(), self.underMouse()
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setPen(QPen(QColor(T.CYAN if checked else T.LINE_HI if hover else T.LINE), 1.6 if checked else 1))
+        p.setBrush(QColor(T.BG3 if checked or hover else "#060c18"))
+        p.drawRoundedRect(r, 12, 12)
+
+        # Escena: un documento claro sobre un escritorio oscuro.
+        scene = r.adjusted(10, 10, -10, -52)
+        clip = QPainterPath()
+        clip.addRoundedRect(scene, 8, 8)
+        p.save()
+        p.setClipPath(clip)
+        desk = QLinearGradient(scene.topLeft(), scene.bottomRight())
+        desk.setColorAt(0, QColor("#1d3158"))
+        desk.setColorAt(1, QColor("#0a1122"))
+        p.fillRect(scene, desk)
+        doc = QRectF(scene.left() + scene.width() * 0.08, scene.top() + 10, scene.width() * 0.52, scene.height())
+        p.fillRect(doc, QColor("#e8edf5"))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor("#b4bfd1"))
+        for i in range(7):
+            width = doc.width() - 20 if i % 3 != 2 else (doc.width() - 20) * 0.55
+            p.drawRoundedRect(QRectF(doc.left() + 10, doc.top() + 10 + i * 11, width, 4), 2, 2)
+        p.restore()
+
+        # Miniatura de la barra, a la misma escala en los tres diseños.
+        k = scene.width() * 0.86 / 440
+        pw, ph = look.width * k, look.height * k
+        pill = QRectF(scene.center().x() - pw / 2, scene.bottom() - ph - 12, pw, ph)
+        p.setOpacity(s.overlay_opacity)
+        paint_pill(p, pill, look, "recording", s.overlay_bg_opacity, 6)
+        accent, cy = look.accents["recording"], pill.center().y()
+        dot_x = pill.left() + ph * 0.45
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(T.qc(accent, 0.3))
+        p.drawEllipse(QPointF(dot_x, cy), ph * 0.14, ph * 0.14)
+        p.setBrush(QColor(accent))
+        p.drawEllipse(QPointF(dot_x, cy), ph * 0.08, ph * 0.08)
+        font = T.display_font(8, look.font_weight)
+        font.setPixelSize(max(7, round(ph * 0.3)))
+        text_rect = QRectF(pill.right() - ph * 0.4 - ph, pill.top(), ph, ph)
+        p.setFont(font)
+        p.setPen(QColor(look.text["recording"]))
+        p.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, "0:04")
+        left, right = dot_x + ph * 0.35, text_rect.right() - ph * 0.85
+        bw, gap = max(1.5, look.bar_width * k * 1.2), max(1.4, look.bar_gap * k * 1.2)
+        n = max(1, int((right - left + gap) // (bw + gap)))
+        grad = QLinearGradient(left, 0, right, 0)
+        for pos, color in look.bars:
+            grad.setColorAt(pos, QColor(color))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(grad))
+        for i in range(n):
+            v = 0.15 + 0.8 * abs(math.sin(i * 0.9) * math.sin(i * 0.31 + 1.2))
+            bh = max(bw, v * ph * 0.52)
+            p.setOpacity(s.overlay_opacity * (0.3 + 0.7 * i / max(1, n - 1)))
+            p.drawRoundedRect(QRectF(left + i * (bw + gap), cy - bh / 2, bw, bh), bw / 2, bw / 2)
+        p.setOpacity(1.0)
+
+        # Nombre y descripción.
+        p.setFont(T.display_font(10.5))
+        p.setPen(QColor(T.ICE if checked else T.TEXT))
+        p.drawText(QRectF(r.left() + 14, scene.bottom() + 9, r.width() - 50, 20),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, look.name)
+        small = QFont("Segoe UI")
+        small.setPointSizeF(8.5)
+        p.setFont(small)
+        p.setPen(QColor(T.MUTED if checked else T.DIM))
+        desc = QFontMetrics(small).elidedText(look.description, Qt.TextElideMode.ElideRight, int(r.width() - 28))
+        p.drawText(QRectF(r.left() + 14, scene.bottom() + 28, r.width() - 28, 18),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, desc)
+        if checked:
+            p.drawPixmap(QPointF(r.right() - 30, scene.bottom() + 11), glyph_pixmap(T.Glyph.CHECK, T.CYAN, 16))

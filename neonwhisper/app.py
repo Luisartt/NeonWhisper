@@ -27,6 +27,7 @@ from neonwhisper.ui.window import MainWindow
 
 log = logging.getLogger(APP_NAME)
 MIN_SECONDS = 0.35
+OVERLAY_KEYS = ("overlay_style", "overlay_scale", "overlay_bg_opacity", "overlay_opacity")
 SINGLE_INSTANCE_KEY = "NeonWhisper-single-instance"
 
 
@@ -73,6 +74,8 @@ class Controller(QObject):
         self.window = MainWindow(self)
         self.overlay = Overlay(lambda: self.recorder.level)
         self.overlay.cancel_requested.connect(self.cancel_recording)
+        self._apply_overlay_look()
+        self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.settings.save)
 
         self.hotkeys = HotkeyManager()
         try:
@@ -137,6 +140,9 @@ class Controller(QObject):
 
     def quit(self) -> None:
         self.quitting = True
+        if self._save_timer.isActive():
+            self._save_timer.stop()
+            self.settings.save()
         self.window.settings.stop_mic_test()
         if self.recorder.recording:
             self.recorder.stop()
@@ -326,6 +332,11 @@ class Controller(QObject):
         if getattr(self.settings, key) == value:
             return
         setattr(self.settings, key, value)
+        if key in OVERLAY_KEYS:  # los deslizadores cambian muchas veces por segundo
+            self._save_timer.start()
+            self._apply_overlay_look()
+            self.preview_overlay()
+            return
         self.settings.save()
         if key in ("model", "device"):
             self.request_load.emit(self.settings.model, self.settings.device)
@@ -336,6 +347,23 @@ class Controller(QObject):
             self.window.home.set_hotkey(self.settings.hotkey, value)
         elif key == "launch_at_startup":
             set_launch_at_startup(value)
+
+    # --- barra flotante --------------------------------------------------------
+    def _apply_overlay_look(self) -> None:
+        s = self.settings
+        self.overlay.apply_appearance(s.overlay_style, s.overlay_scale, s.overlay_bg_opacity, s.overlay_opacity)
+
+    def preview_overlay(self) -> None:
+        if not (self.recorder.recording or self.jobs):
+            self.overlay.show_preview(3000)
+
+    def reset_overlay_look(self) -> None:
+        defaults = Settings()
+        for key in OVERLAY_KEYS:
+            setattr(self.settings, key, getattr(defaults, key))
+        self.settings.save()
+        self._apply_overlay_look()
+        self.preview_overlay()
 
     # --- modelos y descargas ---------------------------------------------------
     def _reconcile_models(self) -> None:

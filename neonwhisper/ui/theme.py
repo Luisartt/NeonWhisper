@@ -77,6 +77,7 @@ class Glyph:
     DOWNLOAD = ""
     RETRY = ""
     CLEAR = ""
+    PALETTE = ""
 
 
 # --- Hoja de estilos ----------------------------------------------------------

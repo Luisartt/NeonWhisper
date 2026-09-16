@@ -38,6 +38,10 @@ class Settings:
     start_minimized: bool = False
     launch_at_startup: bool = False
     show_overlay: bool = True
+    overlay_style: str = "neon"  # neon | glass | mono (ver ui/overlay_styles.py)
+    overlay_scale: float = 1.0
+    overlay_bg_opacity: float = 0.96  # fondo de la barra (0 = solo ondas y borde)
+    overlay_opacity: float = 1.0  # toda la barra
 
     @classmethod
     def load(cls) -> "Settings":

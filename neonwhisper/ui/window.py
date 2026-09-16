@@ -19,9 +19,10 @@ from neonwhisper.mictest import MicTester
 from neonwhisper.paths import DATA_DIR, MODELS_DIR
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.widgets import (
-    GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, StatusDot, ToggleSwitch, WaveBars, add_glow, card, glyph_icon,
-    label, make_app_icon,
+    GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot, ToggleSwitch, WaveBars, add_glow,
+    card, glyph_icon, label, make_app_icon,
 )
+from neonwhisper.ui.overlay_styles import STYLES
 
 if TYPE_CHECKING:
     from neonwhisper.app import Controller
@@ -575,14 +576,63 @@ class SettingsPage(QWidget):
         vl.addWidget(test)
         self._row(sec, "Volumen de sonidos", "", vol, last=True)
 
+        # Barra flotante
+        sec = self._section(root, T.Glyph.PALETTE, "Barra flotante")
+        self._row(sec, "Mostrar barra flotante", "La barra de voz que aparece sobre tus apps mientras dictas.",
+                  self._toggle(s.show_overlay, lambda v: ctl.update_setting("show_overlay", v)))
+        design = QWidget()
+        dv = QVBoxLayout(design)
+        dv.setContentsMargins(0, 12, 0, 14)
+        dv.setSpacing(4)
+        title = QLabel("Diseño")
+        title.setStyleSheet(f"font-size: 10.5pt; font-weight: 600; color: {T.TEXT};")
+        dv.addWidget(title)
+        dv.addWidget(label("Al cambiar cualquier opción, la barra aparece unos segundos para que veas cómo queda.", "dim",
+                           wrap=True))
+        dv.addSpacing(8)
+        cards = QHBoxLayout()
+        cards.setSpacing(12)
+        self.style_group = QButtonGroup(self)
+        self.style_cards: dict[str, OverlayStyleCard] = {}
+        for key in STYLES:
+            c = OverlayStyleCard(key, s)
+            c.setChecked(key == s.overlay_style)
+            c.clicked.connect(lambda _=False, k=key: self._set_overlay("overlay_style", k))
+            self.style_group.addButton(c)
+            self.style_cards[key] = c
+            cards.addWidget(c)
+        dv.addLayout(cards)
+        sec.addWidget(design)
+        sec.addWidget(separator())
+        self.overlay_sliders = {
+            "overlay_scale": self._percent_slider(s.overlay_scale, 70, 150, "overlay_scale"),
+            "overlay_bg_opacity": self._percent_slider(s.overlay_bg_opacity, 0, 100, "overlay_bg_opacity"),
+            "overlay_opacity": self._percent_slider(s.overlay_opacity, 30, 100, "overlay_opacity"),
+        }
+        self._row(sec, "Tamaño", "Qué tan grande se ve la barra en tu pantalla.",
+                  self.overlay_sliders["overlay_scale"])
+        self._row(sec, "Fondo", "Bájalo para ver lo que hay detrás; las ondas y el texto siguen visibles.",
+                  self.overlay_sliders["overlay_bg_opacity"])
+        self._row(sec, "Opacidad", "Transparencia de toda la barra: fondo, ondas y texto.",
+                  self.overlay_sliders["overlay_opacity"])
+        actions = QWidget()
+        al = QHBoxLayout(actions)
+        al.setContentsMargins(0, 0, 0, 0)
+        al.setSpacing(10)
+        preview = icon_button(T.Glyph.PLAY, "Vista previa")
+        preview.clicked.connect(ctl.preview_overlay)
+        reset = icon_button(T.Glyph.RETRY, "Restablecer", "ghost", "Volver al diseño Neón original")
+        reset.clicked.connect(self._reset_overlay)
+        al.addWidget(reset)
+        al.addWidget(preview)
+        self._row(sec, "Probar", "Muestra la barra con voz simulada durante 3 segundos.", actions, last=True)
+
         # Comportamiento
         sec = self._section(root, T.Glyph.PASTE, "Comportamiento")
         self._row(sec, "Pegar automáticamente", "Si lo apagas, el texto solo se copia al portapapeles.",
                   self._toggle(s.auto_paste, lambda v: ctl.update_setting("auto_paste", v)))
         self._row(sec, "Restaurar portapapeles", "Después de pegar, vuelve a dejar lo que tenías copiado.",
                   self._toggle(s.restore_clipboard, lambda v: ctl.update_setting("restore_clipboard", v)))
-        self._row(sec, "Barra flotante", "Muestra la barra de voz sobre tus apps mientras dictas.",
-                  self._toggle(s.show_overlay, lambda v: ctl.update_setting("show_overlay", v)))
         self._row(sec, "Iniciar con Windows", "Arranca NeonWhisper en la bandeja al encender tu PC.",
                   self._toggle(s.launch_at_startup, lambda v: ctl.update_setting("launch_at_startup", v)))
         self._row(sec, "Iniciar minimizado", "Abre directo en la bandeja del sistema.",
@@ -641,6 +691,50 @@ class SettingsPage(QWidget):
         section.addWidget(row)
         if not last:
             section.addWidget(separator())
+
+    # --- barra flotante -------------------------------------------------------
+    def _percent_slider(self, value: float, lo: int, hi: int, key: str) -> QWidget:
+        host = QWidget()
+        h = QHBoxLayout(host)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(12)
+        slider = NoWheelSlider(Qt.Orientation.Horizontal)
+        slider.setRange(lo, hi)
+        slider.setPageStep(10)
+        slider.setFixedWidth(220)
+        pct = QLabel()
+        pct.setFixedWidth(46)
+        pct.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        pct.setStyleSheet(f"color: {T.ICE}; font-family: Bahnschrift; font-size: 10.5pt; font-weight: 600;")
+
+        def changed(v: int) -> None:
+            pct.setText(f"{v}%")
+            self._set_overlay(key, v / 100)
+
+        slider.setValue(round(value * 100))
+        pct.setText(f"{slider.value()}%")
+        slider.valueChanged.connect(changed)
+        h.addWidget(slider)
+        h.addWidget(pct)
+        host.slider = slider
+        return host
+
+    def _set_overlay(self, key: str, value) -> None:
+        if getattr(self.ctl.settings, key) == value:
+            self.ctl.preview_overlay()
+        else:
+            self.ctl.update_setting(key, value)
+        for c in self.style_cards.values():
+            c.update()
+
+    def _reset_overlay(self) -> None:
+        self.ctl.reset_overlay_look()
+        s = self.ctl.settings
+        for key, host in self.overlay_sliders.items():
+            host.slider.setValue(round(getattr(s, key) * 100))
+        self.style_cards[s.overlay_style].setChecked(True)
+        for c in self.style_cards.values():
+            c.update()
 
     def refresh_models(self, key: str | None = None) -> None:
         for k, row in self.model_rows.items():
