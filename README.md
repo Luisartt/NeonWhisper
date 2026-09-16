@@ -42,7 +42,7 @@ El instalador hace todo solo:
 - descarga el modelo `large-v3-turbo` (~1.6 GB, solo la primera vez),
 - crea accesos directos en el escritorio y el menú Inicio, y abre la app.
 
-Después, abre **NeonWhisper** desde el escritorio (o con `NeonWhisper.bat`).
+Después, abre **NeonWhisper** desde el escritorio o búscalo en el menú Inicio. Si mueves la carpeta de lugar, ejecuta `scripts\crear_accesos.bat` para regenerar los accesos directos.
 
 > **Requisitos:** Windows 10/11 · ~5 GB libres · internet solo para instalar. Recomendado: GPU NVIDIA con drivers recientes (funciona sin GPU, pero más lento).
 

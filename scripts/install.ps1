@@ -52,21 +52,7 @@ if ($LASTEXITCODE -ne 0) { Fail "No se pudo descargar el modelo." }
 # 5. Icono y accesos directos
 Step "Creando accesos directos..."
 if (-not (Test-Path (Join-Path $Root "assets\icon.ico"))) { & $python scripts\make_icon.py }
-$shell = New-Object -ComObject WScript.Shell
-$targets = @(
-    [Environment]::GetFolderPath("Desktop"),
-    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs")
-)
-foreach ($dir in $targets) {
-    $lnk = $shell.CreateShortcut((Join-Path $dir "NeonWhisper.lnk"))
-    $lnk.TargetPath = $pythonw
-    $lnk.Arguments = "`"$Root\NeonWhisper.pyw`""
-    $lnk.WorkingDirectory = $Root
-    $lnk.IconLocation = "$Root\assets\icon.ico"
-    $lnk.Description = "Dictado por voz local con Whisper"
-    $lnk.Save()
-    Write-Host "     $dir\NeonWhisper.lnk"
-}
+& (Join-Path $PSScriptRoot "create_shortcuts.ps1")
 
 Write-Host ""
 Write-Host "  Listo. Abre NeonWhisper desde el escritorio o el menu Inicio." -ForegroundColor Green
