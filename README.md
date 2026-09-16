@@ -33,6 +33,10 @@
   <img src="docs/overlay_done.png" width="400" alt="Barra flotante: pegado">
 </p>
 
+<p align="center">
+  <img src="docs/overlay_designs.png" width="820" alt="Diseños de la barra flotante: Neón, Cristal y Sutil">
+</p>
+
 ## Instalación (Windows 10/11)
 
 1. Descarga el repositorio: botón verde **Code → Download ZIP** y descomprímelo donde quieras que viva la app, **de preferencia en un SSD** (p. ej. `C:\NeonWhisper`). En un disco duro mecánico el modelo tarda ~20 s en cargar al encender la PC; en un SSD, ~4 s.
