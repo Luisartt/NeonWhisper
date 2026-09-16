@@ -11,6 +11,8 @@ MODELS = {
     "small": "Small · muy ligero, para CPU",
 }
 
+MODEL_SIZES = {"large-v3-turbo": "~1.6 GB", "large-v3": "~3 GB", "medium": "~1.5 GB", "small": "~500 MB"}
+
 LANGUAGES = {
     "es": "Español",
     "en": "English",
@@ -25,7 +27,8 @@ class Settings:
     model: str = "large-v3-turbo"
     device: str = "auto"  # auto | cuda | cpu
     language: str = "es"
-    input_device: int | None = None  # None = micrófono predeterminado de Windows
+    input_device: int | None = None  # (antiguo) índice; los índices cambian al reiniciar
+    input_device_name: str = ""  # "" = micrófono predeterminado de Windows
     auto_paste: bool = True
     restore_clipboard: bool = True
     sounds: bool = True

@@ -32,7 +32,7 @@
 
 ## Instalación (Windows 10/11)
 
-1. Descarga el repositorio: botón verde **Code → Download ZIP** y descomprímelo donde quieras que viva la app (p. ej. `D:\NeonWhisper`).
+1. Descarga el repositorio: botón verde **Code → Download ZIP** y descomprímelo donde quieras que viva la app, **de preferencia en un SSD** (p. ej. `C:\NeonWhisper`). En un disco duro mecánico el modelo tarda ~20 s en cargar al encender la PC; en un SSD, ~4 s.
 2. Doble clic en **`Instalar.bat`**.
 
 El instalador hace todo solo:
@@ -40,9 +40,10 @@ El instalador hace todo solo:
 - instala [uv](https://github.com/astral-sh/uv) y Python 3.12 **dentro de la carpeta** (no toca tu sistema),
 - instala Whisper, las librerías CUDA y la interfaz,
 - descarga el modelo `large-v3-turbo` (~1.6 GB, solo la primera vez),
-- crea accesos directos en el escritorio y el menú Inicio, y abre la app.
+- crea accesos directos en el escritorio y el menú Inicio,
+- activa el **inicio con Windows** (minimizado en la bandeja, con Whisper ya cargado cuando lo necesites) y abre la app.
 
-Después, abre **NeonWhisper** desde el escritorio o búscalo en el menú Inicio. Si mueves la carpeta de lugar, ejecuta `scripts\crear_accesos.bat` para regenerar los accesos directos.
+Después, abre **NeonWhisper** desde el escritorio o búscalo en el menú Inicio. Si mueves la carpeta de lugar, ejecuta `scripts\crear_accesos.bat` para regenerar los accesos directos y el inicio con Windows. Puedes desactivar el inicio automático en Ajustes → Comportamiento.
 
 > **Requisitos:** Windows 10/11 · ~5 GB libres · internet solo para instalar. Recomendado: GPU NVIDIA con drivers recientes (funciona sin GPU, pero más lento).
 

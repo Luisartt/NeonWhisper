@@ -25,6 +25,20 @@ def list_input_devices() -> list[tuple[int, str]]:
     ]
 
 
+def resolve_input_device(name: str, legacy_index: int | None = None) -> int | None:
+    """Busca el micrófono por nombre (los índices de PortAudio cambian entre reinicios)."""
+    devices = list_input_devices()
+    if name:
+        return next((i for i, n in devices if n == name), None)
+    if legacy_index is not None and any(i == legacy_index for i, _ in devices):
+        return legacy_index
+    return None
+
+
+def device_name(index: int | None) -> str:
+    return next((n for i, n in list_input_devices() if i == index), "") if index is not None else ""
+
+
 class Recorder:
     def __init__(self):
         self._lock = threading.Lock()

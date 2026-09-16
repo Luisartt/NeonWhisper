@@ -11,10 +11,10 @@ from PySide6.QtWidgets import (
 )
 
 from neonwhisper import __version__
-from neonwhisper.audio import list_input_devices
-from neonwhisper.config import LANGUAGES, MODELS
+from neonwhisper.audio import device_name, list_input_devices
+from neonwhisper.config import LANGUAGES, MODEL_SIZES, MODELS
 from neonwhisper.history import Entry
-from neonwhisper.paths import DATA_DIR, MODELS_DIR
+from neonwhisper.paths import DATA_DIR, MODELS_DIR, model_downloaded
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.widgets import (
     GlyphLabel, KeyCaps, Logo, MicOrb, StatusDot, ToggleSwitch, WaveBars, add_glow, card, glyph_icon, label,
@@ -25,6 +25,26 @@ if TYPE_CHECKING:
     from neonwhisper.app import Controller
 
 MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+
+
+class NoWheelComboBox(QComboBox):
+    """La rueda del mouse desplaza la página en vez de cambiar la opción por accidente."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+
+class NoWheelSlider(QSlider):
+    def __init__(self, orientation):
+        super().__init__(orientation)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
 
 
 def human_date(stamp: str) -> str:
@@ -353,8 +373,10 @@ class SettingsPage(QWidget):
 
         # Whisper
         sec = self._section(root, T.Glyph.BOLT, "Whisper")
+        self.model_combo = self._combo(MODELS, s.model, self._on_model_selected)
+        self.refresh_model_labels()
         self._row(sec, "Modelo", "Large v3 Turbo es casi tan preciso como Large v3 y varias veces más rápido.",
-                  self._combo(MODELS, s.model, lambda v: ctl.update_setting("model", v)))
+                  self.model_combo)
         self._row(sec, "Procesador", "Con tu GPU NVIDIA la transcripción tarda una fracción de segundo.",
                   self._combo({"auto": "Automático (GPU si hay)", "cuda": "GPU NVIDIA (CUDA)", "cpu": "CPU"},
                               s.device, lambda v: ctl.update_setting("device", v)))
@@ -368,22 +390,23 @@ class SettingsPage(QWidget):
 
         # Audio
         sec = self._section(root, T.Glyph.MIC, "Audio")
-        self.mic_combo = QComboBox()
-        self.mic_combo.addItem("Predeterminado de Windows", None)
-        for idx, name in list_input_devices():
-            self.mic_combo.addItem(name, idx)
-        pos = self.mic_combo.findData(s.input_device)
-        self.mic_combo.setCurrentIndex(max(0, pos))
-        self.mic_combo.currentIndexChanged.connect(
-            lambda _: ctl.update_setting("input_device", self.mic_combo.currentData())
-        )
+        self.mic_combo = NoWheelComboBox()
+        self.mic_combo.addItem("Predeterminado de Windows", "")
+        for _, name in list_input_devices():
+            if self.mic_combo.findData(name) < 0:
+                self.mic_combo.addItem(name, name)
+        current_mic = s.input_device_name or device_name(s.input_device)
+        if current_mic and self.mic_combo.findData(current_mic) < 0:
+            self.mic_combo.addItem(f"{current_mic} (desconectado)", current_mic)
+        self.mic_combo.setCurrentIndex(max(0, self.mic_combo.findData(current_mic)))
+        self.mic_combo.currentIndexChanged.connect(self._on_mic_selected)
         self._row(sec, "Micrófono", "El dispositivo que se usa para grabar.", self.mic_combo)
         self._row(sec, "Sonidos", "Un chime corto al empezar y terminar de grabar.",
                   self._toggle(s.sounds, lambda v: ctl.update_setting("sounds", v)))
         vol = QWidget()
         vl = QHBoxLayout(vol)
         vl.setContentsMargins(0, 0, 0, 0)
-        slider = QSlider(Qt.Orientation.Horizontal)
+        slider = NoWheelSlider(Qt.Orientation.Horizontal)
         slider.setRange(0, 100)
         slider.setValue(int(s.sound_volume * 100))
         slider.setFixedWidth(200)
@@ -464,9 +487,39 @@ class SettingsPage(QWidget):
             line.setStyleSheet(f"background: {T.LINE};")
             section.addWidget(line)
 
+    def refresh_model_labels(self) -> None:
+        for i in range(self.model_combo.count()):
+            key = self.model_combo.itemData(i)
+            suffix = "  ✓ instalado" if model_downloaded(key) else f"  · descargar {MODEL_SIZES.get(key, '')}"
+            self.model_combo.setItemText(i, MODELS[key] + suffix)
+
+    def _on_model_selected(self, key: str) -> None:
+        if key == self.ctl.settings.model:
+            return
+        if not model_downloaded(key):
+            box = QMessageBox(self)
+            box.setWindowTitle("Descargar modelo")
+            box.setText(
+                f"«{MODELS[key].split(' · ')[0]}» no está instalado ({MODEL_SIZES.get(key, '')}).\n\n"
+                "¿Descargarlo ahora? Mientras se descarga puedes seguir dictando con el modelo actual."
+            )
+            box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+            box.button(QMessageBox.StandardButton.Yes).setText("Descargar")
+            box.button(QMessageBox.StandardButton.Cancel).setText("Cancelar")
+            if box.exec() != QMessageBox.StandardButton.Yes:
+                self.model_combo.blockSignals(True)
+                self.model_combo.setCurrentIndex(self.model_combo.findData(self.ctl.settings.model))
+                self.model_combo.blockSignals(False)
+                return
+        self.ctl.update_setting("model", key)
+
+    def _on_mic_selected(self, _index: int) -> None:
+        self.ctl.update_setting("input_device", None)
+        self.ctl.update_setting("input_device_name", self.mic_combo.currentData() or "")
+
     @staticmethod
     def _combo(options: dict[str, str], current: str, on_change) -> QComboBox:
-        combo = QComboBox()
+        combo = NoWheelComboBox()
         for key, text in options.items():
             combo.addItem(text, key)
         combo.setCurrentIndex(max(0, combo.findData(current)))
@@ -607,7 +660,7 @@ class MainWindow(QMainWindow):
 
     def set_model_status(self, state: str, detail: str) -> None:
         self.dot.state = state
-        titles = {"downloading": "Descargando modelo", "loading": "Cargando modelo", "ready": "Whisper listo", "error": "Error del modelo"}
+        titles = {"downloading": "Descargando modelo", "loading": "Iniciando modelo", "ready": "Whisper listo", "error": "Error del modelo"}
         self.model_title.setText(titles.get(state, state))
         self.model_detail.setText(detail)
 

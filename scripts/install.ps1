@@ -30,7 +30,7 @@ Write-Host "     uv: $uv"
 # 2. Python + dependencias (dentro de la carpeta del proyecto)
 Step "Instalando Python 3.12 y dependencias (Whisper, CUDA, interfaz). Puede tardar unos minutos..."
 $env:UV_PYTHON_INSTALL_DIR = Join-Path $Root ".python"
-& $uv python install 3.12
+& $uv python install 3.12 --no-bin
 if ($LASTEXITCODE -ne 0) { Fail "No se pudo instalar Python." }
 & $uv sync --python 3.12 --python-preference only-managed
 if ($LASTEXITCODE -ne 0) { Fail "No se pudieron instalar las dependencias." }
@@ -52,7 +52,7 @@ if ($LASTEXITCODE -ne 0) { Fail "No se pudo descargar el modelo." }
 # 5. Icono y accesos directos
 Step "Creando accesos directos..."
 if (-not (Test-Path (Join-Path $Root "assets\icon.ico"))) { & $python scripts\make_icon.py }
-& (Join-Path $PSScriptRoot "create_shortcuts.ps1")
+& (Join-Path $PSScriptRoot "create_shortcuts.ps1") -Autostart
 
 Write-Host ""
 Write-Host "  Listo. Abre NeonWhisper desde el escritorio o el menu Inicio." -ForegroundColor Green

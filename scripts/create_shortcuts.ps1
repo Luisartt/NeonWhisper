@@ -1,5 +1,8 @@
 # Crea los accesos directos de NeonWhisper en el escritorio y en el menu Inicio
 # (el menu Inicio es lo que hace que aparezca en la busqueda de Windows).
+#   -Autostart  arranca NeonWhisper minimizado en la bandeja al iniciar sesion
+#   -Launch     abre la app al terminar
+param([switch]$Autostart, [switch]$Launch)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $pythonw = Join-Path $Root ".venv\Scripts\pythonw.exe"
@@ -78,4 +81,14 @@ foreach ($dir in $targets) {
     $lnk.Save()
     try { [LnkAppId]::Set($path, $AppId) } catch { Write-Host "     (No se pudo asignar AppUserModelID: $_)" }
     Write-Host "     $path"
+}
+
+if ($Autostart) {
+    $run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    Set-ItemProperty -Path $run -Name "NeonWhisper" -Value "`"$pythonw`" `"$launcher`" --minimized"
+    Write-Host "     Inicio con Windows: activado (minimizado en la bandeja)"
+}
+
+if ($Launch) {
+    Start-Process -FilePath $pythonw -ArgumentList "`"$launcher`"" -WorkingDirectory $Root
 }

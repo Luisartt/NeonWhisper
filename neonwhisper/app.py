@@ -5,18 +5,18 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from neonwhisper import APP_NAME, sounds
-from neonwhisper.audio import Recorder
+from neonwhisper.audio import Recorder, resolve_input_device
 from neonwhisper.config import Settings
 from neonwhisper.history import History
 from neonwhisper.hotkeys import HotkeyManager, is_safe_hotkey
 from neonwhisper.paster import Paster
-from neonwhisper.paths import LOG_FILE, ROOT
+from neonwhisper.paths import LOG_FILE, ROOT, model_downloaded
 from neonwhisper.transcriber import Transcriber
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.overlay import Overlay
@@ -38,10 +38,13 @@ class Controller(QObject):
         self.quitting = False
         self.capturing_hotkey = False
         self.settings = Settings.load()
+        sync_launch_at_startup(self.settings)
         self.history = History()
         self.recorder = Recorder()
         self.paster = Paster()
         self.model_state = "loading"
+        self.model_usable = False
+        self._load_attempts = 0
         self.pending: list = []
         self.jobs = 0
         self._tray_hint_shown = False
@@ -76,6 +79,8 @@ class Controller(QObject):
         self.hotkeys.capture_cancelled.connect(self.cancel_hotkey_capture)
 
         self._build_tray()
+        if model_downloaded(self.settings.model):
+            self.window.set_model_status("loading", f"{self.settings.model} · instalado ✓")
         self.refresh_stats()
         self._set_ui_state()
         self.request_load.emit(self.settings.model, self.settings.device)
@@ -141,11 +146,11 @@ class Controller(QObject):
         if recording:
             home.set_state("recording", "Escuchando…")
         elif self.jobs:
-            home.set_state("processing", "Transcribiendo…" if self.model_state == "ready" else "Cargando Whisper…")
-        elif self.model_state == "error":
+            home.set_state("processing", "Transcribiendo…" if self.model_usable else "Iniciando Whisper…")
+        elif not self.model_usable and self.model_state == "error":
             home.set_state("disabled", "No se pudo cargar Whisper")
-        elif self.model_state != "ready":
-            home.set_state("idle", "Cargando Whisper…")
+        elif not self.model_usable:
+            home.set_state("idle", "Iniciando Whisper…")
         else:
             home.set_state("idle", message or "Listo para dictar")
 
@@ -207,11 +212,11 @@ class Controller(QObject):
     def start_recording(self) -> None:
         if self.recorder.recording or self.capturing_hotkey:
             return
-        if self.model_state == "error":
+        if self.model_state == "error" and not self.model_usable:
             self._notify("Whisper no está disponible: revisa Ajustes", error=True)
             return
         try:
-            self.recorder.start(self.settings.input_device)
+            self.recorder.start(resolve_input_device(self.settings.input_device_name, self.settings.input_device))
         except Exception:  # noqa: BLE001
             log.exception("No se pudo abrir el micrófono")
             self._notify("No se pudo abrir el micrófono", error=True)
@@ -234,8 +239,8 @@ class Controller(QObject):
             return
         self.jobs += 1
         if self.settings.show_overlay:
-            self.overlay.show_processing("Transcribiendo…" if self.model_state == "ready" else "Cargando Whisper…")
-        if self.model_state == "ready":
+            self.overlay.show_processing("Transcribiendo…" if self.model_usable else "Iniciando Whisper…")
+        if self.model_usable:
             self.request_transcribe.emit(audio, self.settings.language, self.settings.initial_prompt)
         else:
             self.pending.append(audio)
@@ -253,13 +258,21 @@ class Controller(QObject):
         self.model_state = state
         self.window.set_model_status(state, detail)
         if state == "ready":
+            self.model_usable = True
+            self._load_attempts = 0
             for audio in self.pending:
                 self.request_transcribe.emit(audio, self.settings.language, self.settings.initial_prompt)
             self.pending.clear()
-        elif state == "error" and self.pending:
-            self.jobs -= len(self.pending)
-            self.pending.clear()
-            self._notify("No se pudo cargar Whisper", error=True)
+            self.window.settings.refresh_model_labels()
+        elif state == "error" and not self.model_usable:
+            if self._load_attempts < 3:  # p. ej. al encender la PC el driver de la GPU aún no está listo
+                self._load_attempts += 1
+                self.window.set_model_status("loading", f"Reintentando ({self._load_attempts}/3)…")
+                QTimer.singleShot(8000, lambda: self.request_load.emit(self.settings.model, self.settings.device))
+            elif self.pending:
+                self.jobs -= len(self.pending)
+                self.pending.clear()
+                self._notify("No se pudo cargar Whisper", error=True)
         self._set_ui_state()
 
     def on_transcribed(self, text: str, audio_seconds: float, language: str, elapsed: float) -> None:
@@ -304,9 +317,6 @@ class Controller(QObject):
         setattr(self.settings, key, value)
         self.settings.save()
         if key in ("model", "device"):
-            self.model_state = "loading"
-            self.window.set_model_status("loading", f"Cargando {self.settings.model}…")
-            self._set_ui_state()
             self.request_load.emit(self.settings.model, self.settings.device)
         elif key == "sound_volume":
             sounds.generate(value)
@@ -330,20 +340,46 @@ class Controller(QObject):
         self.refresh_stats()
 
 
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def _startup_command() -> str:
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    return f'"{pythonw}" "{ROOT / "NeonWhisper.pyw"}" --minimized'
+
+
+def get_launch_at_startup() -> str | None:
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            return winreg.QueryValueEx(key, APP_NAME)[0]
+    except OSError:
+        return None
+
+
 def set_launch_at_startup(enabled: bool) -> None:
     import winreg
 
-    run_key = r"Software\Microsoft\Windows\CurrentVersion\Run"
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_key, 0, winreg.KEY_SET_VALUE) as key:
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
         if enabled:
-            pythonw = Path(sys.executable).with_name("pythonw.exe")
-            command = f'"{pythonw}" "{ROOT / "NeonWhisper.pyw"}" --minimized'
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command)
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, _startup_command())
         else:
             try:
                 winreg.DeleteValue(key, APP_NAME)
             except FileNotFoundError:
                 pass
+
+
+def sync_launch_at_startup(settings: Settings) -> None:
+    """El registro manda: refleja su estado en Ajustes y corrige la ruta si la carpeta se movió."""
+    current = get_launch_at_startup()
+    settings.launch_at_startup = current is not None
+    if current is not None and current != _startup_command():
+        try:
+            set_launch_at_startup(True)
+        except OSError:
+            log.exception("No se pudo actualizar el inicio con Windows")
 
 
 def _setup_logging() -> None:
@@ -353,15 +389,18 @@ def _setup_logging() -> None:
     sys.excepthook = lambda *exc: log.critical("Error no controlado", exc_info=exc)
 
 
-def _already_running() -> bool:
+def _already_running(show: bool) -> bool:
+    """Si ya hay una instancia abierta, le pide mostrarse (salvo arranque minimizado) y devuelve True."""
     sock = QLocalSocket()
     sock.connectToServer(SINGLE_INSTANCE_KEY)
-    if sock.waitForConnected(300):
+    if not sock.waitForConnected(300):
+        return False
+    if show:
         sock.write(b"show")
         sock.flush()
         sock.waitForBytesWritten(300)
-        return True
-    return False
+    sock.disconnectFromServer()
+    return True
 
 
 def main() -> None:
@@ -371,15 +410,29 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
-    if _already_running():
+    minimized = "--minimized" in sys.argv
+    if _already_running(show=not minimized):
         return
     app.setStyleSheet(T.STYLESHEET)
     app.setWindowIcon(make_app_icon())
 
-    ctl = Controller(app, force_minimized="--minimized" in sys.argv)
+    ctl = Controller(app, force_minimized=minimized)
     server = QLocalServer()
     QLocalServer.removeServer(SINGLE_INSTANCE_KEY)
     server.listen(SINGLE_INSTANCE_KEY)
-    server.newConnection.connect(lambda: (server.nextPendingConnection(), ctl.show_window()))
+    connections = []
+
+    def on_connection() -> None:
+        conn = server.nextPendingConnection()
+        connections.append(conn)
+
+        def on_data() -> None:
+            if b"show" in bytes(conn.readAll()):
+                ctl.show_window()
+
+        conn.readyRead.connect(on_data)
+        conn.disconnected.connect(lambda: (connections.remove(conn), conn.deleteLater()))
+
+    server.newConnection.connect(on_connection)
     log.info("NeonWhisper iniciado")
     sys.exit(app.exec())
