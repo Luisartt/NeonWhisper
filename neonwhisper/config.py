@@ -24,7 +24,8 @@ LANGUAGES = {
 class Settings:
     hotkey: str = "ctrl+alt+space"
     mode: str = "toggle"  # "toggle" = presiona para iniciar/detener · "hold" = mantén presionado
-    model: str = "large-v3-turbo"
+    model: str = "large-v3-turbo"  # modelo en uso (siempre uno instalado)
+    pending_model: str = ""  # modelo que se usará automáticamente cuando termine de descargarse
     device: str = "auto"  # auto | cuda | cpu
     language: str = "es"
     input_device: int | None = None  # (antiguo) índice; los índices cambian al reiniciar

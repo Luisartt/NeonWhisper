@@ -3,7 +3,6 @@ import logging
 import os
 import re
 import subprocess
-import threading
 import time
 
 import numpy as np
@@ -35,61 +34,24 @@ def gpu_name() -> str:
 
 
 class Transcriber(QObject):
-    # estado: downloading | loading | ready | error. "ready" significa que hay un modelo usable.
+    # estado: loading | ready | error. "ready" significa que hay un modelo usable.
     status_changed = Signal(str, str)
     finished = Signal(str, float, str, float)  # texto, segundos de audio, idioma, segundos de proceso
     failed = Signal(str)
-    _download_done = Signal(str, str)  # modelo, error ("" si salió bien)
 
     def __init__(self):
         super().__init__()
         self._model = None
         self._loaded: tuple[str, str] = ("", "")
         self._label = ""
-        self._wanted: tuple[str, str] = ("", "")
-        self._downloading: set[str] = set()
-        self._download_done.connect(self._on_download_done)
-
-    @property
-    def has_model(self) -> bool:
-        return self._model is not None
 
     # --- carga ------------------------------------------------------------------
     @Slot(str, str)
     def load(self, model_name: str, device: str) -> None:
-        """Carga el modelo pedido. Si hay que descargarlo, lo hace en segundo plano
-        y el modelo actual sigue funcionando mientras tanto."""
-        self._wanted = (model_name, device)
-        if model_downloaded(model_name):
-            self._load_now(model_name, device)
+        """Carga un modelo ya descargado. Si falla, sigue usando el que estaba cargado."""
+        if not model_downloaded(model_name):
+            self._report_failure(model_name, "el modelo no está descargado")
             return
-        self.status_changed.emit("downloading", f"Descargando {model_name}…")
-        if model_name not in self._downloading:
-            self._downloading.add(model_name)
-            threading.Thread(target=self._download, args=(model_name,), daemon=True).start()
-
-    def _download(self, model_name: str) -> None:  # hilo de descarga
-        from faster_whisper.utils import download_model
-
-        error = ""
-        try:
-            download_model(model_name, output_dir=str(model_dir(model_name)))
-        except Exception as exc:  # noqa: BLE001
-            log.exception("No se pudo descargar %s", model_name)
-            error = str(exc) or exc.__class__.__name__
-        self._downloading.discard(model_name)
-        self._download_done.emit(model_name, error)
-
-    @Slot(str, str)
-    def _on_download_done(self, model_name: str, error: str) -> None:
-        if self._wanted[0] != model_name:
-            return  # el usuario ya eligió otro modelo
-        if error:
-            self._report_failure(model_name, f"no se pudo descargar: {error}")
-        else:
-            self._load_now(*self._wanted)
-
-    def _load_now(self, model_name: str, device: str) -> None:
         if self._model is not None and self._loaded == (model_name, device):
             self.status_changed.emit("ready", f"{model_name} · {self._label}")
             return

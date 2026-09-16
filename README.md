@@ -23,6 +23,8 @@
 - **Historial** con búsqueda, copiar, borrar y exportar a `.txt`.
 - **Whisper large-v3-turbo** con [faster-whisper](https://github.com/SYSTRAN/faster-whisper): en una GPU NVIDIA transcribe ~9 s de audio en ~0.4 s. Si no hay GPU, usa el CPU automáticamente.
 - **Vocabulario personalizado** para que escriba bien nombres propios y términos técnicos.
+- **Prueba de micrófono**: graba 4 segundos, mide el nivel y te reproduce lo que grabó.
+- **Gestor de modelos**: descarga con barra de progreso, velocidad y tiempo restante; pausa, continúa (incluso después de cerrar la app) o cancela. Usa varias conexiones en paralelo y verifica cada archivo.
 - **Privado**: tu voz nunca sale de tu computadora.
 
 <p align="center">
@@ -73,7 +75,7 @@ Si dictas con la ventana de NeonWhisper enfocada (por ejemplo, haciendo clic en 
 | medium | Alta | Rápida | ~2 GB |
 | small | Media | Rápida incluso en CPU | ~1 GB |
 
-Los modelos se descargan la primera vez que los eliges en Ajustes y se guardan en `models/`.
+Se administran en **Ajustes → Modelos de Whisper** (Descargar, Pausar, Continuar, Usar, Eliminar) y se guardan en `models/`.
 
 ## Dónde se guardan tus datos
 

@@ -11,6 +11,14 @@ SAMPLE_RATE = 16000
 log = logging.getLogger(__name__)
 
 
+def level_of(samples: np.ndarray) -> float:
+    """Nivel visual 0..1 de un bloque de audio (escala logarítmica, -55 dB = 0)."""
+    if len(samples) == 0:
+        return 0.0
+    rms = float(np.sqrt(np.mean(samples * samples))) + 1e-9
+    return max(0.0, min(1.0, (20 * math.log10(rms) + 55) / 45)) ** 1.4
+
+
 def list_input_devices() -> list[tuple[int, str]]:
     """Micrófonos del host API predeterminado (evita duplicados MME/WASAPI/DirectSound)."""
     try:
@@ -86,9 +94,7 @@ class Recorder:
         mono = indata[:, 0].copy()
         with self._lock:
             self._chunks.append(mono)
-        rms = float(np.sqrt(np.mean(mono * mono))) + 1e-9
-        db = 20 * math.log10(rms)
-        self.level = max(0.0, min(1.0, (db + 55) / 45)) ** 1.4
+        self.level = level_of(mono)
 
     def stop(self) -> tuple[np.ndarray, float]:
         """Detiene la grabación y devuelve (audio 16 kHz float32, duración en segundos)."""

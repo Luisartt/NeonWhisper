@@ -335,6 +335,87 @@ class WaveBars(QWidget):
         p.setOpacity(1.0)
 
 
+# --- Barra de progreso ----------------------------------------------------------
+class NeonProgress(QWidget):
+    """Barra de progreso neón. Modos: active (con brillo animado), paused, indeterminate, error."""
+
+    def __init__(self, height: int = 8):
+        super().__init__()
+        self.setFixedHeight(height)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.value = 0.0
+        self.mode = "active"
+        self._t0 = time.monotonic()
+        self._timer = QTimer(self, interval=33, timeout=self.update)
+
+    def set_progress(self, value: float, mode: str = "active") -> None:
+        self.value = max(0.0, min(1.0, value))
+        self.mode = mode
+        if mode in ("active", "indeterminate"):
+            if not self._timer.isActive():
+                self._timer.start()
+        else:
+            self._timer.stop()
+        self.update()
+
+    def hideEvent(self, event):
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self, event):
+        if self.mode in ("active", "indeterminate"):
+            self._timer.start()
+        super().showEvent(event)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = float(self.width()), float(self.height())
+        track = QPainterPath()
+        track.addRoundedRect(QRectF(0, 0, w, h), h / 2, h / 2)
+        p.fillPath(track, QColor(T.BG3))
+        p.setClipPath(track)
+        t = time.monotonic() - self._t0
+
+        if self.mode == "indeterminate":
+            seg = w * 0.28
+            x = ((t * 0.7) % 1.35 - 0.35) * w
+            grad = QLinearGradient(x, 0, x + seg, 0)
+            grad.setColorAt(0, T.qc(T.CYAN, 0))
+            grad.setColorAt(0.5, QColor(T.CYAN))
+            grad.setColorAt(1, T.qc(T.CYAN, 0))
+            p.fillRect(QRectF(x, 0, seg, h), QBrush(grad))
+        elif self.value > 0:
+            fw = max(h, w * self.value)
+            grad = QLinearGradient(0, 0, fw, 0)
+            if self.mode == "active":
+                grad.setColorAt(0, QColor(T.BLUE))
+                grad.setColorAt(0.75, QColor(T.CYAN))
+                grad.setColorAt(1, QColor(T.ICE))
+            elif self.mode == "error":
+                grad.setColorAt(0, T.qc(T.DANGER, 0.5))
+                grad.setColorAt(1, QColor(T.DANGER))
+            else:  # paused
+                grad.setColorAt(0, QColor("#223a60"))
+                grad.setColorAt(1, QColor("#3f6aa3"))
+            fill = QPainterPath()
+            fill.addRoundedRect(QRectF(0, 0, fw, h), h / 2, h / 2)
+            p.fillPath(fill, QBrush(grad))
+            if self.mode == "active":
+                band = 70.0
+                x = (t * 0.55 % 1.0) * (fw + band) - band
+                shine = QLinearGradient(x, 0, x + band, 0)
+                shine.setColorAt(0, QColor(255, 255, 255, 0))
+                shine.setColorAt(0.5, QColor(255, 255, 255, 110))
+                shine.setColorAt(1, QColor(255, 255, 255, 0))
+                p.setClipPath(fill)
+                p.fillRect(QRectF(x, 0, band, h), QBrush(shine))
+        p.setClipping(False)
+        p.setPen(QPen(QColor(T.LINE_HI), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), h / 2, h / 2)
+
+
 # --- Controles ----------------------------------------------------------------
 class ToggleSwitch(QAbstractButton):
     def __init__(self, checked: bool = False):

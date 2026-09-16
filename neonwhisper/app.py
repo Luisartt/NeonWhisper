@@ -12,7 +12,9 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from neonwhisper import APP_NAME, sounds
 from neonwhisper.audio import Recorder, resolve_input_device
-from neonwhisper.config import Settings
+from neonwhisper.config import MODELS, Settings
+from neonwhisper.downloader import DownloadManager
+from neonwhisper.fmt import fmt_eta
 from neonwhisper.history import History
 from neonwhisper.hotkeys import HotkeyManager, is_safe_hotkey
 from neonwhisper.paster import Paster
@@ -31,6 +33,8 @@ SINGLE_INSTANCE_KEY = "NeonWhisper-single-instance"
 class Controller(QObject):
     request_load = Signal(str, str)
     request_transcribe = Signal(object, str, str)
+    download_changed = Signal(str)
+    download_installed = Signal(str)
 
     def __init__(self, app: QApplication, force_minimized: bool = False):
         super().__init__()
@@ -39,6 +43,10 @@ class Controller(QObject):
         self.capturing_hotkey = False
         self.settings = Settings.load()
         sync_launch_at_startup(self.settings)
+        self._reconcile_models()
+        self.downloads = DownloadManager(on_change=self.download_changed.emit, on_installed=self.download_installed.emit)
+        self.download_changed.connect(self.on_download_changed)
+        self.download_installed.connect(self.on_download_installed)
         self.history = History()
         self.recorder = Recorder()
         self.paster = Paster()
@@ -84,6 +92,7 @@ class Controller(QObject):
         self.refresh_stats()
         self._set_ui_state()
         self.request_load.emit(self.settings.model, self.settings.device)
+        self._resume_downloads()
 
         if not (self.settings.start_minimized or force_minimized):
             self.show_window()
@@ -128,6 +137,7 @@ class Controller(QObject):
 
     def quit(self) -> None:
         self.quitting = True
+        self.window.settings.stop_mic_test()
         if self.recorder.recording:
             self.recorder.stop()
         self.hotkeys.shutdown()
@@ -215,6 +225,7 @@ class Controller(QObject):
         if self.model_state == "error" and not self.model_usable:
             self._notify("Whisper no está disponible: revisa Ajustes", error=True)
             return
+        self.window.settings.stop_mic_test()
         try:
             self.recorder.start(resolve_input_device(self.settings.input_device_name, self.settings.input_device))
         except Exception:  # noqa: BLE001
@@ -263,7 +274,7 @@ class Controller(QObject):
             for audio in self.pending:
                 self.request_transcribe.emit(audio, self.settings.language, self.settings.initial_prompt)
             self.pending.clear()
-            self.window.settings.refresh_model_labels()
+            self.window.settings.refresh_models()
         elif state == "error" and not self.model_usable:
             if self._load_attempts < 3:  # p. ej. al encender la PC el driver de la GPU aún no está listo
                 self._load_attempts += 1
@@ -325,6 +336,87 @@ class Controller(QObject):
             self.window.home.set_hotkey(self.settings.hotkey, value)
         elif key == "launch_at_startup":
             set_launch_at_startup(value)
+
+    # --- modelos y descargas ---------------------------------------------------
+    def _reconcile_models(self) -> None:
+        """El modelo en uso siempre debe estar instalado; si no, se usa otro mientras se descarga."""
+        s = self.settings
+        if not model_downloaded(s.model):
+            fallback = next((m for m in MODELS if model_downloaded(m)), None)
+            if fallback:
+                s.pending_model = s.pending_model or s.model
+                s.model = fallback
+            else:
+                s.pending_model = s.model
+        if s.pending_model and model_downloaded(s.pending_model):
+            s.model, s.pending_model = s.pending_model, ""
+        s.save()
+
+    def _resume_downloads(self) -> None:
+        for model in self.downloads.interrupted():
+            self.downloads.start(model)
+        pending = self.settings.pending_model
+        if pending and self.downloads.info(pending).state == "missing":
+            self.downloads.start(pending)
+        self._update_download_summary()
+
+    def start_download(self, model: str) -> None:
+        self.downloads.start(model)
+
+    def pause_download(self, model: str) -> None:
+        self.downloads.pause(model)
+
+    def resume_download(self, model: str) -> None:
+        self.downloads.start(model)
+
+    def cancel_download(self, model: str) -> None:
+        if self.settings.pending_model == model:
+            self.update_setting("pending_model", "")
+        self.downloads.cancel(model)
+
+    def delete_model(self, model: str) -> None:
+        if model != self.settings.model:
+            self.downloads.delete(model)
+
+    def use_model(self, model: str) -> None:
+        if model_downloaded(model):
+            self.update_setting("model", model)
+            self.window.settings.refresh_models()
+
+    def on_download_changed(self, model: str) -> None:
+        self.window.settings.refresh_models(model)
+        self._update_download_summary()
+
+    def on_download_installed(self, model: str) -> None:
+        name = MODELS.get(model, model).split(" · ")[0]
+        self.tray.showMessage("Modelo descargado", f"{name} ya está instalado.", self.icon_idle, 3000)
+        if model == self.settings.pending_model or not self.model_usable:
+            self.update_setting("pending_model", "")
+            self.use_model(model)
+        self.window.settings.refresh_models()
+        self._update_download_summary()
+
+    def _update_download_summary(self) -> None:
+        order = {"downloading": 0, "verifying": 1, "connecting": 2, "error": 3, "paused": 4}
+        active = sorted(
+            ((m, info) for m in MODELS if (info := self.downloads.info(m)).state in order),
+            key=lambda item: order[item[1].state],
+        )
+        if not active:
+            self.window.set_download_summary(None)
+            return
+        model, info = active[0]
+        pct = f"{info.fraction * 100:.0f}%"
+        text, mode = {
+            "downloading": (f"Descargando {model} · {pct} · {fmt_eta(info.eta)}", "active"),
+            "verifying": (f"Verificando {model}…", "indeterminate"),
+            "connecting": (f"Conectando para {model}…", "indeterminate"),
+            "error": (f"Error al descargar {model}", "error"),
+            "paused": (f"{model} en pausa · {pct}", "paused"),
+        }[info.state]
+        if len(active) > 1:
+            text += f"  (+{len(active) - 1})"
+        self.window.set_download_summary(text, info.fraction, mode)
 
     def test_sound(self) -> None:
         sounds.play("start")

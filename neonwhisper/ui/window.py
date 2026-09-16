@@ -11,14 +11,16 @@ from PySide6.QtWidgets import (
 )
 
 from neonwhisper import __version__
-from neonwhisper.audio import device_name, list_input_devices
+from neonwhisper.audio import device_name, list_input_devices, resolve_input_device
 from neonwhisper.config import LANGUAGES, MODEL_SIZES, MODELS
+from neonwhisper.fmt import fmt_bytes, fmt_eta, fmt_speed
 from neonwhisper.history import Entry
-from neonwhisper.paths import DATA_DIR, MODELS_DIR, model_downloaded
+from neonwhisper.mictest import MicTester
+from neonwhisper.paths import DATA_DIR, MODELS_DIR
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.widgets import (
-    GlyphLabel, KeyCaps, Logo, MicOrb, StatusDot, ToggleSwitch, WaveBars, add_glow, card, glyph_icon, label,
-    make_app_icon,
+    GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, StatusDot, ToggleSwitch, WaveBars, add_glow, card, glyph_icon,
+    label, make_app_icon,
 )
 
 if TYPE_CHECKING:
@@ -96,6 +98,39 @@ def icon_button(glyph: str, text: str = "", variant: str | None = None, tooltip:
 def flash_check(btn: QPushButton, glyph: str) -> None:
     btn.setIcon(glyph_icon(T.Glyph.CHECK, color=T.OK, hover=T.OK))
     QTimer.singleShot(1200, lambda: btn.setIcon(glyph_icon(glyph)))
+
+
+def confirm(parent: QWidget, title: str, text: str, ok_text: str) -> bool:
+    box = QMessageBox(parent)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+    box.button(QMessageBox.StandardButton.Yes).setText(ok_text)
+    box.button(QMessageBox.StandardButton.Cancel).setText("Cancelar")
+    return box.exec() == QMessageBox.StandardButton.Yes
+
+
+def separator() -> QFrame:
+    line = QFrame()
+    line.setFixedHeight(1)
+    line.setStyleSheet(f"background: {T.LINE};")
+    return line
+
+
+def download_text(info) -> tuple[str, str]:
+    """(texto de detalle, modo de la barra) para un DownloadInfo."""
+    amount = f"{fmt_bytes(info.done)} de {fmt_bytes(info.total)} · {info.fraction * 100:.0f}%" if info.total else ""
+    if info.state == "connecting":
+        return ("Conectando…" + (f" · {amount}" if amount else ""), "indeterminate")
+    if info.state == "downloading":
+        return (f"{amount} · {fmt_speed(info.speed)} · {fmt_eta(info.eta)}", "active")
+    if info.state == "paused":
+        return (f"En pausa · {amount}", "paused")
+    if info.state == "verifying":
+        return ("Verificando el archivo descargado…", "indeterminate")
+    if info.state == "error":
+        return (f"⚠ {info.error}" + (f" · {amount}" if amount else ""), "error")
+    return ("", "paused")
 
 
 # --- Inicio -------------------------------------------------------------------
@@ -327,14 +362,105 @@ class HistoryPage(QWidget):
                 f.write(f"[{e.created_at}]\n{e.text}\n\n")
 
     def _clear(self) -> None:
-        box = QMessageBox(self)
-        box.setWindowTitle("Borrar historial")
-        box.setText("¿Borrar todo el historial? Esta acción no se puede deshacer.")
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-        box.button(QMessageBox.StandardButton.Yes).setText("Borrar todo")
-        box.button(QMessageBox.StandardButton.Cancel).setText("Cancelar")
-        if box.exec() == QMessageBox.StandardButton.Yes:
+        if confirm(self, "Borrar historial", "¿Borrar todo el historial? Esta acción no se puede deshacer.", "Borrar todo"):
             self.ctl.clear_history()
+
+
+# --- Modelos ------------------------------------------------------------------
+class ModelRow(QWidget):
+    def __init__(self, key: str, ctl: "Controller"):
+        super().__init__()
+        self.key, self.ctl = key, ctl
+        name, _, desc = MODELS[key].partition(" · ")
+        self.name = name
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 12, 0, 12)
+        v.setSpacing(8)
+
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        texts = QVBoxLayout()
+        texts.setSpacing(2)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title = QLabel(name)
+        title.setStyleSheet(f"font-size: 10.5pt; font-weight: 600; color: {T.TEXT};")
+        self.badge = QLabel("EN USO")
+        self.badge.setStyleSheet(
+            f"color: #021018; background: {T.CYAN}; border-radius: 8px; padding: 1px 8px;"
+            "font-family: Bahnschrift; font-size: 8pt; font-weight: 600;"
+        )
+        title_row.addWidget(title)
+        title_row.addWidget(self.badge)
+        title_row.addStretch(1)
+        texts.addLayout(title_row)
+        texts.addWidget(label(f"{MODEL_SIZES.get(key, '')} · {desc}", "dim"))
+        top.addLayout(texts, 1)
+
+        self.btn_use = icon_button(T.Glyph.CHECK, "Usar")
+        self.btn_download = icon_button(T.Glyph.DOWNLOAD, "Descargar", variant="primary")
+        self.btn_pause = icon_button(T.Glyph.PAUSE, "Pausar")
+        self.btn_resume = icon_button(T.Glyph.PLAY, "Continuar", variant="primary")
+        self.btn_retry = icon_button(T.Glyph.RETRY, "Reintentar", variant="primary")
+        self.btn_cancel = icon_button(T.Glyph.CANCEL, variant="ghost", tooltip="Cancelar y borrar lo descargado")
+        self.btn_delete = icon_button(T.Glyph.DELETE, variant="ghost", tooltip="Eliminar del disco")
+        self.btn_use.clicked.connect(lambda: ctl.use_model(key))
+        self.btn_download.clicked.connect(lambda: ctl.start_download(key))
+        self.btn_pause.clicked.connect(lambda: ctl.pause_download(key))
+        self.btn_resume.clicked.connect(lambda: ctl.resume_download(key))
+        self.btn_retry.clicked.connect(lambda: ctl.resume_download(key))
+        self.btn_cancel.clicked.connect(self._cancel)
+        self.btn_delete.clicked.connect(self._delete)
+        for b in (self.btn_use, self.btn_download, self.btn_pause, self.btn_resume, self.btn_retry,
+                  self.btn_cancel, self.btn_delete):
+            top.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+        v.addLayout(top)
+
+        self.bar = NeonProgress(8)
+        self.detail = QLabel()
+        v.addWidget(self.bar)
+        v.addWidget(self.detail)
+        self.refresh()
+
+    def refresh(self) -> None:
+        info = self.ctl.downloads.info(self.key)
+        state = info.state
+        in_use = state == "installed" and self.ctl.settings.model == self.key
+        self.badge.setVisible(in_use)
+        visible = {
+            self.btn_use: state == "installed" and not in_use,
+            self.btn_delete: state == "installed" and not in_use,
+            self.btn_download: state == "missing",
+            self.btn_pause: state in ("connecting", "downloading"),
+            self.btn_resume: state == "paused",
+            self.btn_retry: state == "error",
+            self.btn_cancel: state in ("connecting", "downloading", "paused", "error"),
+        }
+        for button, on in visible.items():
+            button.setVisible(on)
+        in_progress = state in ("connecting", "downloading", "paused", "verifying", "error")
+        self.bar.setVisible(in_progress)
+        self.detail.setVisible(in_progress)
+        if not in_progress:
+            return
+        text, mode = download_text(info)
+        if self.ctl.settings.pending_model == self.key:
+            text += " · se usará al terminar"
+        self.bar.set_progress(info.fraction, mode)
+        self.detail.setText(text)
+        color = T.DANGER if state == "error" else (T.ICE if state == "downloading" else T.MUTED)
+        self.detail.setStyleSheet(f"color: {color}; font-size: 9pt;")
+
+    def _cancel(self) -> None:
+        if confirm(self, "Cancelar descarga",
+                   f"¿Cancelar la descarga de {self.name} y borrar lo que ya se descargó?", "Cancelar descarga"):
+            self.ctl.cancel_download(self.key)
+
+    def _delete(self) -> None:
+        if confirm(self, "Eliminar modelo",
+                   f"¿Eliminar {self.name} de tu disco ({MODEL_SIZES.get(self.key, '')})? Podrás descargarlo de nuevo.",
+                   "Eliminar"):
+            self.ctl.delete_model(self.key)
 
 
 # --- Ajustes ------------------------------------------------------------------
@@ -373,10 +499,6 @@ class SettingsPage(QWidget):
 
         # Whisper
         sec = self._section(root, T.Glyph.BOLT, "Whisper")
-        self.model_combo = self._combo(MODELS, s.model, self._on_model_selected)
-        self.refresh_model_labels()
-        self._row(sec, "Modelo", "Large v3 Turbo es casi tan preciso como Large v3 y varias veces más rápido.",
-                  self.model_combo)
         self._row(sec, "Procesador", "Con tu GPU NVIDIA la transcripción tarda una fracción de segundo.",
                   self._combo({"auto": "Automático (GPU si hay)", "cuda": "GPU NVIDIA (CUDA)", "cpu": "CPU"},
                               s.device, lambda v: ctl.update_setting("device", v)))
@@ -387,6 +509,18 @@ class SettingsPage(QWidget):
         self.prompt.setMinimumWidth(300)
         self.prompt.editingFinished.connect(lambda: ctl.update_setting("initial_prompt", self.prompt.text()))
         self._row(sec, "Vocabulario", "Nombres y términos que Whisper debe escribir bien.", self.prompt, last=True)
+
+        # Modelos
+        sec = self._section(root, T.Glyph.DOWNLOAD, "Modelos de Whisper")
+        sec.addWidget(label(
+            "Large v3 Turbo es casi tan preciso como Large v3 y varias veces más rápido. "
+            "Puedes pausar una descarga y continuarla después, incluso si cierras la app.", "dim", wrap=True))
+        self.model_rows: dict[str, ModelRow] = {}
+        for i, key in enumerate(MODELS):
+            if i:
+                sec.addWidget(separator())
+            self.model_rows[key] = ModelRow(key, ctl)
+            sec.addWidget(self.model_rows[key])
 
         # Audio
         sec = self._section(root, T.Glyph.MIC, "Audio")
@@ -400,7 +534,31 @@ class SettingsPage(QWidget):
             self.mic_combo.addItem(f"{current_mic} (desconectado)", current_mic)
         self.mic_combo.setCurrentIndex(max(0, self.mic_combo.findData(current_mic)))
         self.mic_combo.currentIndexChanged.connect(self._on_mic_selected)
-        self._row(sec, "Micrófono", "El dispositivo que se usa para grabar.", self.mic_combo)
+        mic_host = QWidget()
+        mh = QHBoxLayout(mic_host)
+        mh.setContentsMargins(0, 0, 0, 0)
+        mh.setSpacing(10)
+        mh.addWidget(self.mic_combo)
+        self.mic_test_btn = icon_button(T.Glyph.MIC, "Probar")
+        self.mic_test_btn.clicked.connect(self._toggle_mic_test)
+        mh.addWidget(self.mic_test_btn)
+        self._row(sec, "Micrófono", "Pruébalo: graba 4 segundos, mide el nivel y te reproduce lo que grabó.",
+                  mic_host, last=True)
+        self.mic_tester = MicTester()
+        self.mic_tester.changed.connect(self._on_mic_test)
+        self.mic_panel = QWidget()
+        mp = QHBoxLayout(self.mic_panel)
+        mp.setContentsMargins(0, 0, 0, 14)
+        mp.setSpacing(16)
+        self.mic_bars = WaveBars(lambda: self.mic_tester.level, height=40)
+        self.mic_status = QLabel()
+        self.mic_status.setWordWrap(True)
+        self.mic_status.setMinimumWidth(280)
+        mp.addWidget(self.mic_bars, 1)
+        mp.addWidget(self.mic_status, 1)
+        self.mic_panel.hide()
+        sec.addWidget(self.mic_panel)
+        sec.addWidget(separator())
         self._row(sec, "Sonidos", "Un chime corto al empezar y terminar de grabar.",
                   self._toggle(s.sounds, lambda v: ctl.update_setting("sounds", v)))
         vol = QWidget()
@@ -482,40 +640,40 @@ class SettingsPage(QWidget):
         h.addWidget(control, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         section.addWidget(row)
         if not last:
-            line = QFrame()
-            line.setFixedHeight(1)
-            line.setStyleSheet(f"background: {T.LINE};")
-            section.addWidget(line)
+            section.addWidget(separator())
 
-    def refresh_model_labels(self) -> None:
-        for i in range(self.model_combo.count()):
-            key = self.model_combo.itemData(i)
-            suffix = "  ✓ instalado" if model_downloaded(key) else f"  · descargar {MODEL_SIZES.get(key, '')}"
-            self.model_combo.setItemText(i, MODELS[key] + suffix)
-
-    def _on_model_selected(self, key: str) -> None:
-        if key == self.ctl.settings.model:
-            return
-        if not model_downloaded(key):
-            box = QMessageBox(self)
-            box.setWindowTitle("Descargar modelo")
-            box.setText(
-                f"«{MODELS[key].split(' · ')[0]}» no está instalado ({MODEL_SIZES.get(key, '')}).\n\n"
-                "¿Descargarlo ahora? Mientras se descarga puedes seguir dictando con el modelo actual."
-            )
-            box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-            box.button(QMessageBox.StandardButton.Yes).setText("Descargar")
-            box.button(QMessageBox.StandardButton.Cancel).setText("Cancelar")
-            if box.exec() != QMessageBox.StandardButton.Yes:
-                self.model_combo.blockSignals(True)
-                self.model_combo.setCurrentIndex(self.model_combo.findData(self.ctl.settings.model))
-                self.model_combo.blockSignals(False)
-                return
-        self.ctl.update_setting("model", key)
+    def refresh_models(self, key: str | None = None) -> None:
+        for k, row in self.model_rows.items():
+            if key is None or k == key:
+                row.refresh()
 
     def _on_mic_selected(self, _index: int) -> None:
+        self.stop_mic_test()
         self.ctl.update_setting("input_device", None)
         self.ctl.update_setting("input_device_name", self.mic_combo.currentData() or "")
+
+    # --- prueba de micrófono -------------------------------------------------
+    def _toggle_mic_test(self) -> None:
+        if self.mic_tester.active:
+            self.mic_tester.stop()
+            return
+        if self.ctl.recorder.recording:
+            return
+        self.mic_panel.show()
+        s = self.ctl.settings
+        self.mic_tester.start(resolve_input_device(s.input_device_name, s.input_device))
+
+    def stop_mic_test(self) -> None:
+        if self.mic_tester.active:
+            self.mic_tester.stop()
+
+    def _on_mic_test(self, state: str, message: str) -> None:
+        active = state in ("recording", "playing")
+        self.mic_bars.set_mode("recording" if active else "idle")
+        self.mic_test_btn.setText("Detener" if active else "Probar otra vez")
+        color = {"ok": T.OK, "silent": T.DANGER, "error": T.DANGER}.get(state, T.ICE if active else T.MUTED)
+        self.mic_status.setStyleSheet(f"color: {color}; font-size: 10pt;")
+        self.mic_status.setText(message)
 
     @staticmethod
     def _combo(options: dict[str, str], current: str, on_change) -> QComboBox:
@@ -646,6 +804,14 @@ class MainWindow(QMainWindow):
         self.model_detail = label("", "dim", wrap=True)
         texts.addWidget(self.model_title)
         texts.addWidget(self.model_detail)
+        self.dl_label = QLabel()
+        self.dl_label.setWordWrap(True)
+        self.dl_bar = NeonProgress(6)
+        texts.addSpacing(6)
+        texts.addWidget(self.dl_label)
+        texts.addWidget(self.dl_bar)
+        self.dl_label.hide()
+        self.dl_bar.hide()
         st.addLayout(texts, 1)
         sv.addWidget(status)
         sv.addWidget(label("100% local · privado", "dim"), 0, Qt.AlignmentFlag.AlignHCenter)
@@ -663,6 +829,16 @@ class MainWindow(QMainWindow):
         titles = {"downloading": "Descargando modelo", "loading": "Iniciando modelo", "ready": "Whisper listo", "error": "Error del modelo"}
         self.model_title.setText(titles.get(state, state))
         self.model_detail.setText(detail)
+
+    def set_download_summary(self, text: str | None, fraction: float = 0.0, mode: str = "active") -> None:
+        visible = bool(text)
+        self.dl_label.setVisible(visible)
+        self.dl_bar.setVisible(visible)
+        if visible:
+            color = T.DANGER if mode == "error" else (T.ICE if mode in ("active", "indeterminate") else T.MUTED)
+            self.dl_label.setStyleSheet(f"color: {color}; font-size: 8.5pt;")
+            self.dl_label.setText(text)
+            self.dl_bar.set_progress(fraction, mode)
 
     def set_recording_indicator(self, recording: bool) -> None:
         self.logo.active = recording

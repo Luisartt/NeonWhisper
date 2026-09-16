@@ -73,6 +73,9 @@ class Glyph:
     PASTE = ""
     EXPORT = ""
     PLAY = ""
+    PAUSE = ""
+    DOWNLOAD = ""
+    RETRY = ""
     CLEAR = ""
 
 
