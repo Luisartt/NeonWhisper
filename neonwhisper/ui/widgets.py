@@ -1,4 +1,4 @@
-"""Widgets pintados a mano: logo, orbe del micrófono, barras de voz, switches y teclas."""
+"""Widgets pintados a mano: logo, orbe del micrófono, barras de voz, switches, teclas y tarjetas de tema."""
 import math
 import time
 from collections import deque
@@ -18,6 +18,33 @@ from neonwhisper.ui import theme as T
 from neonwhisper.ui.overlay_styles import STYLES, paint_pill
 
 
+# --- Re-estilizado al cambiar de tema -----------------------------------------
+def on_restyle(widget: QWidget, fn: Callable[[], None]) -> None:
+    """Registra algo que hay que volver a calcular al cambiar de tema (íconos, brillos, HTML) y lo aplica ya."""
+    widget._restyle_fns = [*getattr(widget, "_restyle_fns", []), fn]
+    fn()
+
+
+def repolish(widget: QWidget) -> None:
+    """Vuelve a aplicar la hoja de estilos después de cambiar una propiedad (role, tone, variant)."""
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
+
+
+def set_tone(widget: QWidget, tone: str | None) -> None:
+    widget.setProperty("tone", tone)
+    repolish(widget)
+
+
+def restyle(root: QWidget) -> None:
+    """Repinta un árbol de widgets con el tema activo."""
+    for w in (root, *root.findChildren(QWidget)):
+        for fn in getattr(w, "_restyle_fns", ()):
+            fn()
+        repolish(w)
+
+
 # --- Íconos -------------------------------------------------------------------
 def paint_logo(p: QPainter, rect: QRectF, active: bool = False) -> None:
     s = rect.width()
@@ -25,8 +52,8 @@ def paint_logo(p: QPainter, rect: QRectF, active: bool = False) -> None:
     inset = s * 0.05
     body = rect.adjusted(inset, inset, -inset, -inset)
     bg = QLinearGradient(body.topLeft(), body.bottomRight())
-    bg.setColorAt(0, QColor("#0b1a38" if not active else "#0a2d52"))
-    bg.setColorAt(1, QColor("#02040a"))
+    bg.setColorAt(0, QColor(T.LOGO_ACTIVE if active else T.LOGO_IDLE))
+    bg.setColorAt(1, QColor(T.ORB_DEEP))
     p.setPen(QPen(T.qc(T.CYAN, 0.95 if active else 0.6), max(1.0, s * 0.035)))
     p.setBrush(bg)
     p.drawRoundedRect(body, s * 0.24, s * 0.24)
@@ -80,7 +107,10 @@ def glyph_pixmap(glyph: str, color: str, px: int = 18) -> QPixmap:
     return pm
 
 
-def glyph_icon(glyph: str, color: str = T.MUTED, hover: str = T.ICE, checked: str = T.ICE, px: int = 18) -> QIcon:
+def glyph_icon(glyph: str, color: str | None = None, hover: str | None = None, checked: str | None = None,
+               px: int = 18) -> QIcon:
+    color, hover = color or T.MUTED, hover or T.ICE
+    checked = checked or T.ICE
     icon = QIcon()
     icon.addPixmap(glyph_pixmap(glyph, color, px), QIcon.Mode.Normal, QIcon.State.Off)
     icon.addPixmap(glyph_pixmap(glyph, hover, px), QIcon.Mode.Active, QIcon.State.Off)
@@ -90,12 +120,18 @@ def glyph_icon(glyph: str, color: str = T.MUTED, hover: str = T.ICE, checked: st
     return icon
 
 
-def add_glow(widget: QWidget, color: str = T.CYAN, blur: int = 26, alpha: float = 0.55) -> None:
+def add_glow(widget: QWidget, color: str | None = None, blur: int = 26, alpha: float = 0.55) -> None:
     effect = QGraphicsDropShadowEffect(widget)
     effect.setBlurRadius(blur)
     effect.setOffset(0, 0)
-    effect.setColor(T.qc(color, alpha))
     widget.setGraphicsEffect(effect)
+    on_restyle(widget, lambda: (effect.setBlurRadius(round(blur * max(0.5, T.GLOW))),
+                                effect.setColor(T.qc(color or T.CYAN, alpha * T.GLOW))))
+
+
+def set_glyph_icon(button: QAbstractButton, factory: Callable[[], QIcon]) -> None:
+    """Ícono que se vuelve a dibujar con los colores del tema activo."""
+    on_restyle(button, lambda: button.setIcon(factory()))
 
 
 def label(text: str = "", role: str | None = None, wrap: bool = False) -> QLabel:
@@ -126,8 +162,6 @@ class Logo(QWidget):
 
 
 class StatusDot(QWidget):
-    COLORS = {"ready": T.OK, "error": T.DANGER, "loading": T.BLUE, "downloading": T.BLUE, "recording": T.CYAN}
-
     def __init__(self, size: int = 10):
         super().__init__()
         self.setFixedSize(size + 12, size + 12)
@@ -136,10 +170,14 @@ class StatusDot(QWidget):
         self._timer = QTimer(self, interval=50, timeout=self.update)
         self._timer.start()
 
+    def _color(self) -> str:
+        return {"ready": T.OK, "error": T.DANGER, "loading": T.BLUE,
+                "downloading": T.BLUE, "recording": T.CYAN}.get(self.state, T.MUTED)
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        color = self.COLORS.get(self.state, T.MUTED)
+        color = self._color()
         c = QPointF(self.width() / 2, self.height() / 2)
         pulse = 0.5 + 0.5 * math.sin(time.monotonic() * (6 if self.state == "recording" else 3))
         if self.state in ("loading", "downloading", "recording"):
@@ -238,12 +276,12 @@ class MicOrb(QWidget):
 
         core = QRadialGradient(c - QPointF(R * 0.3, R * 0.4), R * 1.5)
         if rec:
-            core.setColorAt(0, QColor("#0d5d8f"))
-            core.setColorAt(0.55, QColor("#07284d"))
+            core.setColorAt(0, QColor(T.ORB_HI))
+            core.setColorAt(0.55, QColor(T.ORB_HI2))
         else:
-            core.setColorAt(0, QColor("#132f5a" if not disabled else "#0c1426"))
-            core.setColorAt(0.55, QColor("#081327"))
-        core.setColorAt(1, QColor("#02050c"))
+            core.setColorAt(0, QColor(T.ORB_OFF if disabled else T.ORB_IDLE))
+            core.setColorAt(0.55, QColor(T.ORB_MID))
+        core.setColorAt(1, QColor(T.ORB_DEEP))
         ring = QConicalGradient(c, -t * 70)
         ring.setColorAt(0.0, QColor(T.CYAN))
         ring.setColorAt(0.33, QColor(T.BLUE))
@@ -282,7 +320,7 @@ class WaveBars(QWidget):
         super().__init__()
         self.level_source = level_source
         self.mode = "idle"  # idle | recording | processing
-        self.stops: tuple[tuple[float, str], ...] = ((0, T.BLUE), (0.6, T.CYAN), (1, T.ICE))
+        self.stops: tuple[tuple[float, str], ...] | None = None  # None = degradado del tema
         self.bar_w, self.gap = 4.0, 3.0
         self.setMinimumHeight(height)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -318,7 +356,7 @@ class WaveBars(QWidget):
         values = [0.0] * (n - len(values)) + values
 
         grad = QLinearGradient(0, 0, w, 0)
-        for pos, color in self.stops:
+        for pos, color in self.stops or ((0, T.BLUE), (0.6, T.CYAN), (1, T.ICE)):
             grad.setColorAt(pos, QColor(color))
         p.setPen(Qt.PenStyle.NoPen)
         mid = h / 2
@@ -401,8 +439,8 @@ class NeonProgress(QWidget):
                 grad.setColorAt(0, T.qc(T.DANGER, 0.5))
                 grad.setColorAt(1, QColor(T.DANGER))
             else:  # paused
-                grad.setColorAt(0, QColor("#223a60"))
-                grad.setColorAt(1, QColor("#3f6aa3"))
+                grad.setColorAt(0, QColor(T.LINE))
+                grad.setColorAt(1, QColor(T.LINE_HI))
             fill = QPainterPath()
             fill.addRoundedRect(QRectF(0, 0, fw, h), h / 2, h / 2)
             p.fillPath(fill, QBrush(grad))
@@ -468,17 +506,11 @@ class ToggleSwitch(QAbstractButton):
         d = r.height() - 6
         x = r.left() + 3 + self._pos * (r.width() - d - 6)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor("#ffffff") if self.isChecked() else QColor(T.MUTED))
+        p.setBrush(QColor(T.ICE) if self.isChecked() else QColor(T.MUTED))
         p.drawEllipse(QRectF(x, r.top() + 3, d, d))
 
 
 class KeyCaps(QWidget):
-    CAP_STYLE = (
-        f"background: #0a1428; color: {T.ICE}; border: 1px solid rgba(0,229,255,0.45);"
-        "border-bottom: 3px solid #0b6f8c; border-radius: 8px; padding: 3px 11px;"
-        "font-family: Bahnschrift; font-size: 11pt; font-weight: 600;"
-    )
-
     def __init__(self, hotkey: str = ""):
         super().__init__()
         self._layout = QHBoxLayout(self)
@@ -494,10 +526,10 @@ class KeyCaps(QWidget):
         for i, part in enumerate(pretty_parts(hotkey)):
             if i:
                 plus = QLabel("+")
-                plus.setStyleSheet(f"color: {T.DIM}; font-size: 11pt;")
+                plus.setObjectName("KeyPlus")
                 self._layout.addWidget(plus)
             cap = QLabel(part)
-            cap.setStyleSheet(self.CAP_STYLE)
+            cap.setObjectName("KeyCap")
             cap.ensurePolished()
             cap.setMinimumSize(cap.sizeHint())
             cap.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -508,14 +540,16 @@ class KeyCaps(QWidget):
 class GlyphLabel(QLabel):
     """Ícono de la fuente de símbolos de Windows (como pixmap, para que la hoja de estilos no lo pise)."""
 
-    def __init__(self, glyph: str, color: str = T.CYAN, px: int = 18):
+    def __init__(self, glyph: str, color: str = "CYAN", px: int = 18):
+        """`color` es el nombre de un color del tema (CYAN, MUTED…) o un hex fijo."""
         super().__init__()
-        self.setPixmap(glyph_pixmap(glyph, color, px))
         self.setFixedSize(px + 4, px + 4)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.set_glyph(glyph, color, px)
 
-    def set_color(self, glyph: str, color: str, px: int = 18) -> None:
-        self.setPixmap(glyph_pixmap(glyph, color, px))
+    def set_glyph(self, glyph: str, color: str = "CYAN", px: int = 18) -> None:
+        self._restyle_fns = []
+        on_restyle(self, lambda: self.setPixmap(glyph_pixmap(glyph, getattr(T, color, color), px)))
 
 
 # --- Selector de diseño de la barra flotante --------------------------------------
@@ -541,7 +575,7 @@ class OverlayStyleCard(QAbstractButton):
         checked, hover = self.isChecked(), self.underMouse()
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         p.setPen(QPen(QColor(T.CYAN if checked else T.LINE_HI if hover else T.LINE), 1.6 if checked else 1))
-        p.setBrush(QColor(T.BG3 if checked or hover else "#060c18"))
+        p.setBrush(QColor(T.BG3 if checked or hover else T.BG0))
         p.drawRoundedRect(r, 12, 12)
 
         # Escena: un documento claro sobre un escritorio oscuro.
@@ -607,6 +641,107 @@ class OverlayStyleCard(QAbstractButton):
         p.setFont(small)
         p.setPen(QColor(T.MUTED if checked else T.DIM))
         desc = QFontMetrics(small).elidedText(look.description, Qt.TextElideMode.ElideRight, int(r.width() - 28))
+        p.drawText(QRectF(r.left() + 14, scene.bottom() + 28, r.width() - 28, 18),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, desc)
+        if checked:
+            p.drawPixmap(QPointF(r.right() - 30, scene.bottom() + 11), glyph_pixmap(T.Glyph.CHECK, T.CYAN, 16))
+
+
+# --- Selector de tema de la interfaz ------------------------------------------
+class ThemeCard(QAbstractButton):
+    """Tarjeta con una maqueta en miniatura de la app pintada con la paleta del tema."""
+
+    def __init__(self, key: str):
+        super().__init__()
+        self.theme = T.THEMES[key]
+        self.setCheckable(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.setFixedHeight(164)
+        self.setMinimumWidth(180)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setToolTip(f"{self.theme.name} · {self.theme.description}")
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        u, checked, hover = self.theme, self.isChecked(), self.underMouse()
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setPen(QPen(QColor(T.CYAN if checked else T.LINE_HI if hover else T.LINE), 1.6 if checked else 1))
+        p.setBrush(QColor(T.BG3 if checked or hover else T.BG0))
+        p.drawRoundedRect(r, 12, 12)
+
+        # Maqueta de la ventana con los colores del tema.
+        scene = r.adjusted(10, 10, -10, -52)
+        clip = QPainterPath()
+        clip.addRoundedRect(scene, 8, 8)
+        p.save()
+        p.setClipPath(clip)
+        p.fillRect(scene, QColor(u.bg0))
+        side = QRectF(scene.left(), scene.top(), scene.width() * 0.3, scene.height())
+        p.fillRect(side, QColor(u.bg1))
+        p.setPen(QPen(QColor(u.line), 1))
+        p.drawLine(side.topRight(), side.bottomRight())
+
+        # Píldoras de navegación: la primera, activa.
+        p.setPen(Qt.PenStyle.NoPen)
+        for i in range(3):
+            pill = QRectF(side.left() + 7, side.top() + 10 + i * 14, side.width() - 14, 9)
+            if i == 0:
+                p.setBrush(T.qc(u.accent, 0.20))
+                p.drawRoundedRect(pill, 4, 4)
+                p.setBrush(QColor(u.ice))
+            else:
+                p.setBrush(QColor(u.dim))
+            p.drawRoundedRect(QRectF(pill.left() + 4, pill.center().y() - 1.5, pill.width() * 0.62, 3), 1.5, 1.5)
+
+        # Tarjeta con título, ondas y botón primario.
+        body = QRectF(side.right() + 9, scene.top() + 10, scene.right() - side.right() - 18, scene.height() - 20)
+        p.setBrush(QColor(u.bg2))
+        p.setPen(QPen(QColor(u.line), 1))
+        p.drawRoundedRect(body, 6, 6)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(u.accent))
+        p.drawRoundedRect(QRectF(body.left() + 8, body.top() + 8, body.width() * 0.34, 3), 1.5, 1.5)
+        p.setBrush(QColor(u.muted))
+        p.drawRoundedRect(QRectF(body.left() + 8, body.top() + 15, body.width() * 0.62, 3), 1.5, 1.5)
+
+        waves = QRectF(body.left() + 8, body.top() + 24, body.width() - 16, body.height() * 0.38)
+        grad = QLinearGradient(waves.left(), 0, waves.right(), 0)
+        grad.setColorAt(0, QColor(u.blue))
+        grad.setColorAt(0.6, QColor(u.accent))
+        grad.setColorAt(1, QColor(u.ice))
+        p.setBrush(QBrush(grad))
+        bw, gap = 3.0, 2.5
+        n = max(1, int((waves.width() + gap) // (bw + gap)))
+        for i in range(n):
+            v = 0.18 + 0.82 * abs(math.sin(i * 0.8) * math.sin(i * 0.27 + 0.9))
+            bh = max(bw, v * waves.height())
+            p.setOpacity(0.35 + 0.65 * i / max(1, n - 1))
+            p.drawRoundedRect(QRectF(waves.left() + i * (bw + gap), waves.center().y() - bh / 2, bw, bh), 1.5, 1.5)
+        p.setOpacity(1.0)
+
+        btn = QRectF(body.left() + 8, body.bottom() - 16, body.width() * 0.4, 10)
+        fill = QLinearGradient(btn.topLeft(), btn.bottomRight())
+        fill.setColorAt(0, QColor(u.primary_from))
+        fill.setColorAt(1, QColor(u.primary_to))
+        p.setBrush(QBrush(fill))
+        p.drawRoundedRect(btn, 5, 5)
+        p.setBrush(QColor(u.bg3))
+        p.setPen(QPen(QColor(u.line_hi), 1))
+        p.drawRoundedRect(QRectF(btn.right() + 6, btn.top(), btn.width() * 0.62, 10), 5, 5)
+        p.restore()
+
+        # Nombre y descripción.
+        p.setFont(T.display_font(10.5))
+        p.setPen(QColor(T.ICE if checked else T.TEXT))
+        p.drawText(QRectF(r.left() + 14, scene.bottom() + 9, r.width() - 50, 20),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, u.name)
+        small = QFont("Segoe UI")
+        small.setPointSizeF(8.5)
+        p.setFont(small)
+        p.setPen(QColor(T.MUTED if checked else T.DIM))
+        desc = QFontMetrics(small).elidedText(u.description, Qt.TextElideMode.ElideRight, int(r.width() - 28))
         p.drawText(QRectF(r.left() + 14, scene.bottom() + 28, r.width() - 28, 18),
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, desc)
         if checked:

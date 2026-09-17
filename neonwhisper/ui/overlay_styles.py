@@ -6,6 +6,9 @@ from PySide6.QtGui import QFont, QLinearGradient, QPainter, QPainterPath, QPen
 
 from neonwhisper.ui import theme as T
 
+# Los diseños de la barra no dependen del tema de la app: cada uno tiene su propia paleta fija.
+N = T.THEMES["neon"]
+
 
 @dataclass(frozen=True)
 class OverlayStyle:
@@ -40,19 +43,19 @@ STYLES: dict[str, OverlayStyle] = {
     "neon": OverlayStyle(
         "neon", "Neón", "Negro profundo con brillo azul", 440, 64,
         bg_top="#081022", bg_bottom="#03050b", bg_alpha=1.0,
-        accents={"recording": T.CYAN, "processing": T.BLUE, "ok": T.OK, "error": T.DANGER},
-        text={"recording": T.ICE, "processing": T.ICE, "ok": T.OK, "error": T.DANGER},
-        bars=((0, T.BLUE), (0.6, T.CYAN), (1, T.ICE)), bar_width=4, bar_gap=3,
-        halo=0.10, halo_color=None, edge=T.BLUE, edge_alpha=0.7, border_accent=0.95, border_width=1.4,
+        accents={"recording": N.accent, "processing": N.blue, "ok": N.ok, "error": N.danger},
+        text={"recording": N.ice, "processing": N.ice, "ok": N.ok, "error": N.danger},
+        bars=((0, N.blue), (0.6, N.accent), (1, N.ice)), bar_width=4, bar_gap=3,
+        halo=0.10, halo_color=None, edge=N.blue, edge_alpha=0.7, border_accent=0.95, border_width=1.4,
         sheen=0.0, font_size=11, font_weight=QFont.Weight.DemiBold,
-        icon=T.MUTED, icon_hover=T.ICE, hover_bg="rgba(0,229,255,0.14)",
+        icon=N.muted, icon_hover=N.ice, hover_bg="rgba(0,229,255,0.14)",
     ),
     "glass": OverlayStyle(
         "glass", "Cristal", "Vidrio azul translúcido", 440, 64,
         bg_top="#21406f", bg_bottom="#0a1733", bg_alpha=0.72,
-        accents={"recording": T.ICE, "processing": "#8fb4ff", "ok": T.OK, "error": "#ff7d9c"},
-        text={"recording": "#f2fbff", "processing": "#dce8ff", "ok": T.OK, "error": "#ff7d9c"},
-        bars=((0, "#8fb4ff"), (0.55, T.ICE), (1, "#ffffff")), bar_width=4, bar_gap=3,
+        accents={"recording": N.ice, "processing": "#8fb4ff", "ok": N.ok, "error": "#ff7d9c"},
+        text={"recording": "#f2fbff", "processing": "#dce8ff", "ok": N.ok, "error": "#ff7d9c"},
+        bars=((0, "#8fb4ff"), (0.55, N.ice), (1, "#ffffff")), bar_width=4, bar_gap=3,
         halo=0.06, halo_color="#7fb2ff", edge="#ffffff", edge_alpha=0.22, border_accent=0.6, border_width=1.2,
         sheen=0.16, font_size=11, font_weight=QFont.Weight.DemiBold,
         icon="#a9c3e8", icon_hover="#ffffff", hover_bg="rgba(255,255,255,0.14)",
