@@ -19,8 +19,8 @@ from neonwhisper.mictest import MicTester
 from neonwhisper.paths import DATA_DIR, MODELS_DIR
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.widgets import (
-    GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot, ToggleSwitch, WaveBars, add_glow,
-    card, glyph_icon, label, make_app_icon,
+    GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot, ThemeCard, ToggleSwitch, WaveBars,
+    add_glow, card, glyph_icon, label, make_app_icon, on_restyle, repolish, restyle, set_glyph_icon, set_tone,
 )
 from neonwhisper.ui.overlay_styles import STYLES
 
@@ -87,7 +87,7 @@ def page_header(eyebrow: str, title: str, subtitle: str = "") -> QVBoxLayout:
 
 def icon_button(glyph: str, text: str = "", variant: str | None = None, tooltip: str = "") -> QPushButton:
     btn = QPushButton(text)
-    btn.setIcon(glyph_icon(glyph, color=T.MUTED if variant != "primary" else "#021018", hover=T.ICE))
+    set_glyph_icon(btn, lambda: glyph_icon(glyph, color=T.ON_ACCENT if variant == "primary" else T.MUTED))
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     if variant:
         btn.setProperty("variant", variant)
@@ -113,8 +113,8 @@ def confirm(parent: QWidget, title: str, text: str, ok_text: str) -> bool:
 
 def separator() -> QFrame:
     line = QFrame()
+    line.setObjectName("Sep")
     line.setFixedHeight(1)
-    line.setStyleSheet(f"background: {T.LINE};")
     return line
 
 
@@ -164,7 +164,7 @@ class HomePage(QWidget):
         self.status = QLabel("Cargando Whisper…")
         self.status.setFont(T.display_font(15))
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status.setStyleSheet(f"color: {T.ICE};")
+        self.status.setProperty("role", "status")
         add_glow(self.status, blur=22, alpha=0.45)
         self.bars = WaveBars(level, height=46)
         hot = QHBoxLayout()
@@ -248,8 +248,8 @@ class HomePage(QWidget):
     def set_last(self, text: str) -> None:
         self._last = text
         self.last_text.setText(text)
-        self.last_text.setProperty("role", None)
-        self.last_text.setStyleSheet(f"color: {T.TEXT}; font-size: 11pt;")
+        self.last_text.setProperty("role", "body")
+        repolish(self.last_text)
 
     def set_stats(self, count: int, words: int, seconds: float | None) -> None:
         self.stat_count.setText(f"{count:,}")
@@ -291,7 +291,7 @@ class EntryCard(QFrame):
         text = QLabel(entry.text)
         text.setWordWrap(True)
         text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        text.setStyleSheet(f"color: {T.TEXT}; font-size: 10.5pt;")
+        text.setProperty("role", "entry")
         v.addWidget(text)
 
     def _copy(self) -> None:
@@ -319,7 +319,8 @@ class HistoryPage(QWidget):
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Buscar en tu historial…")
-        self.search.addAction(glyph_icon(T.Glyph.SEARCH), QLineEdit.ActionPosition.LeadingPosition)
+        search_icon = self.search.addAction(glyph_icon(T.Glyph.SEARCH), QLineEdit.ActionPosition.LeadingPosition)
+        on_restyle(self.search, lambda: search_icon.setIcon(glyph_icon(T.Glyph.SEARCH)))
         self.search.setClearButtonEnabled(True)
         self._debounce = QTimer(self, singleShot=True, interval=180, timeout=self.refresh)
         self.search.textChanged.connect(self._debounce.start)
@@ -384,13 +385,8 @@ class ModelRow(QWidget):
         texts.setSpacing(2)
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
-        title = QLabel(name)
-        title.setStyleSheet(f"font-size: 10.5pt; font-weight: 600; color: {T.TEXT};")
-        self.badge = QLabel("EN USO")
-        self.badge.setStyleSheet(
-            f"color: #021018; background: {T.CYAN}; border-radius: 8px; padding: 1px 8px;"
-            "font-family: Bahnschrift; font-size: 8pt; font-weight: 600;"
-        )
+        title = label(name, "title")
+        self.badge = label("EN USO", "badge")
         title_row.addWidget(title)
         title_row.addWidget(self.badge)
         title_row.addStretch(1)
@@ -418,7 +414,7 @@ class ModelRow(QWidget):
         v.addLayout(top)
 
         self.bar = NeonProgress(8)
-        self.detail = QLabel()
+        self.detail = label("", "detail")
         v.addWidget(self.bar)
         v.addWidget(self.detail)
         self.refresh()
@@ -449,8 +445,7 @@ class ModelRow(QWidget):
             text += " · se usará al terminar"
         self.bar.set_progress(info.fraction, mode)
         self.detail.setText(text)
-        color = T.DANGER if state == "error" else (T.ICE if state == "downloading" else T.MUTED)
-        self.detail.setStyleSheet(f"color: {color}; font-size: 9pt;")
+        set_tone(self.detail, "danger" if state == "error" else ("accent" if state == "downloading" else "muted"))
 
     def _cancel(self) -> None:
         if confirm(self, "Cancelar descarga",
@@ -552,8 +547,7 @@ class SettingsPage(QWidget):
         mp.setContentsMargins(0, 0, 0, 14)
         mp.setSpacing(16)
         self.mic_bars = WaveBars(lambda: self.mic_tester.level, height=40)
-        self.mic_status = QLabel()
-        self.mic_status.setWordWrap(True)
+        self.mic_status = label("", "micstatus", wrap=True)
         self.mic_status.setMinimumWidth(280)
         mp.addWidget(self.mic_bars, 1)
         mp.addWidget(self.mic_status, 1)
@@ -576,6 +570,31 @@ class SettingsPage(QWidget):
         vl.addWidget(test)
         self._row(sec, "Volumen de sonidos", "", vol, last=True)
 
+        # Apariencia
+        sec = self._section(root, T.Glyph.THEME, "Apariencia")
+        sec.addWidget(label("El tema pinta toda la app: fondos, acentos, el orbe del micrófono y el ícono. "
+                            "El cambio es inmediato, no hace falta reiniciar.", "dim", wrap=True))
+        sec.addSpacing(10)
+        theme_cards = QHBoxLayout()
+        theme_cards.setSpacing(12)
+        self.theme_group = QButtonGroup(self)
+        self.theme_cards: dict[str, ThemeCard] = {}
+        for key in T.THEMES:
+            c = ThemeCard(key)
+            c.setChecked(key == s.ui_theme)
+            c.clicked.connect(lambda _=False, k=key: ctl.update_setting("ui_theme", k))
+            self.theme_group.addButton(c)
+            self.theme_cards[key] = c
+            theme_cards.addWidget(c)
+        sec.addLayout(theme_cards)
+        sec.addSpacing(14)
+        sec.addWidget(separator())
+        self._row(sec, "Barra flotante a juego",
+                  "Al cambiar de tema, la barra flotante se pone el diseño del mismo nombre. "
+                  "Apágalo para combinarlos a tu gusto.",
+                  self._toggle(s.theme_syncs_overlay, lambda v: ctl.update_setting("theme_syncs_overlay", v)),
+                  last=True)
+
         # Barra flotante
         sec = self._section(root, T.Glyph.PALETTE, "Barra flotante")
         self._row(sec, "Mostrar barra flotante", "La barra de voz que aparece sobre tus apps mientras dictas.",
@@ -584,9 +603,7 @@ class SettingsPage(QWidget):
         dv = QVBoxLayout(design)
         dv.setContentsMargins(0, 12, 0, 14)
         dv.setSpacing(4)
-        title = QLabel("Diseño")
-        title.setStyleSheet(f"font-size: 10.5pt; font-weight: 600; color: {T.TEXT};")
-        dv.addWidget(title)
+        dv.addWidget(label("Diseño", "title"))
         dv.addWidget(label("Al cambiar cualquier opción, la barra aparece unos segundos para que veas cómo queda.", "dim",
                            wrap=True))
         dv.addSpacing(8)
@@ -665,7 +682,7 @@ class SettingsPage(QWidget):
         v.setSpacing(0)
         head = QHBoxLayout()
         head.setSpacing(10)
-        head.addWidget(GlyphLabel(glyph, T.CYAN, 18))
+        head.addWidget(GlyphLabel(glyph, "CYAN", 18))
         head.addWidget(label(title, "h2"))
         head.addStretch(1)
         v.addLayout(head)
@@ -681,9 +698,7 @@ class SettingsPage(QWidget):
         h.setSpacing(24)
         text = QVBoxLayout()
         text.setSpacing(2)
-        t = QLabel(title)
-        t.setStyleSheet(f"font-size: 10.5pt; font-weight: 600; color: {T.TEXT};")
-        text.addWidget(t)
+        text.addWidget(label(title, "title"))
         if desc:
             text.addWidget(label(desc, "dim", wrap=True))
         h.addLayout(text, 1)
@@ -702,10 +717,9 @@ class SettingsPage(QWidget):
         slider.setRange(lo, hi)
         slider.setPageStep(10)
         slider.setFixedWidth(220)
-        pct = QLabel()
+        pct = label("", "pct")
         pct.setFixedWidth(46)
         pct.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        pct.setStyleSheet(f"color: {T.ICE}; font-family: Bahnschrift; font-size: 10.5pt; font-weight: 600;")
 
         def changed(v: int) -> None:
             pct.setText(f"{v}%")
@@ -736,6 +750,16 @@ class SettingsPage(QWidget):
         for c in self.style_cards.values():
             c.update()
 
+    def set_theme_selection(self, key: str) -> None:
+        """Marca el tema activo y vuelve a dibujar las miniaturas."""
+        if key in self.theme_cards:
+            self.theme_cards[key].setChecked(True)
+        for c in (*self.theme_cards.values(), *self.style_cards.values()):
+            c.update()
+        style_card = self.style_cards.get(self.ctl.settings.overlay_style)
+        if style_card:
+            style_card.setChecked(True)
+
     def refresh_models(self, key: str | None = None) -> None:
         for k, row in self.model_rows.items():
             if key is None or k == key:
@@ -765,8 +789,8 @@ class SettingsPage(QWidget):
         active = state in ("recording", "playing")
         self.mic_bars.set_mode("recording" if active else "idle")
         self.mic_test_btn.setText("Detener" if active else "Probar otra vez")
-        color = {"ok": T.OK, "silent": T.DANGER, "error": T.DANGER}.get(state, T.ICE if active else T.MUTED)
-        self.mic_status.setStyleSheet(f"color: {color}; font-size: 10pt;")
+        tone = {"ok": "ok", "silent": "danger", "error": "danger"}.get(state, "accent" if active else "muted")
+        set_tone(self.mic_status, tone)
         self.mic_status.setText(message)
 
     @staticmethod
@@ -854,7 +878,9 @@ class MainWindow(QMainWindow):
         brand.setSpacing(10)
         self.logo = Logo(36)
         brand.addWidget(self.logo)
-        name = QLabel(f"<span style='color:{T.ICE}'>NEON</span><span style='color:{T.TEXT}'>WHISPER</span>")
+        name = QLabel()
+        on_restyle(name, lambda: name.setText(
+            f"<span style='color:{T.ICE}'>NEON</span><span style='color:{T.TEXT}'>WHISPER</span>"))
         name.setFont(T.display_font(14))
         add_glow(name, blur=24, alpha=0.5)
         brand.addWidget(name)
@@ -875,7 +901,7 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(page)
             btn = QPushButton(f"   {text}")
             btn.setObjectName("NavButton")
-            btn.setIcon(glyph_icon(glyph))
+            set_glyph_icon(btn, lambda g=glyph: glyph_icon(g))
             btn.setCheckable(True)
             btn.setChecked(i == 0)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -893,13 +919,11 @@ class MainWindow(QMainWindow):
         st.addWidget(self.dot, 0, Qt.AlignmentFlag.AlignTop)
         texts = QVBoxLayout()
         texts.setSpacing(1)
-        self.model_title = QLabel("Preparando…")
-        self.model_title.setStyleSheet(f"font-weight: 600; color: {T.TEXT};")
+        self.model_title = label("Preparando…", "strong")
         self.model_detail = label("", "dim", wrap=True)
         texts.addWidget(self.model_title)
         texts.addWidget(self.model_detail)
-        self.dl_label = QLabel()
-        self.dl_label.setWordWrap(True)
+        self.dl_label = label("", "dlstatus", wrap=True)
         self.dl_bar = NeonProgress(6)
         texts.addSpacing(6)
         texts.addWidget(self.dl_label)
@@ -929,14 +953,22 @@ class MainWindow(QMainWindow):
         self.dl_label.setVisible(visible)
         self.dl_bar.setVisible(visible)
         if visible:
-            color = T.DANGER if mode == "error" else (T.ICE if mode in ("active", "indeterminate") else T.MUTED)
-            self.dl_label.setStyleSheet(f"color: {color}; font-size: 8.5pt;")
+            set_tone(self.dl_label, "danger" if mode == "error"
+                     else ("accent" if mode in ("active", "indeterminate") else "muted"))
             self.dl_label.setText(text)
             self.dl_bar.set_progress(fraction, mode)
 
     def set_recording_indicator(self, recording: bool) -> None:
         self.logo.active = recording
         self.logo.update()
+
+    def restyle(self) -> None:
+        """Repinta toda la ventana con el tema activo."""
+        self.setWindowIcon(make_app_icon())
+        restyle(self)
+        self.settings.set_theme_selection(self.ctl.settings.ui_theme)
+        if self.isVisible():
+            T.apply_dark_titlebar(int(self.winId()))
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

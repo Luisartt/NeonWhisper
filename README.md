@@ -19,7 +19,8 @@
 - **Dos modos**: *Iniciar / detener* (presionas una vez para hablar y otra para pegar) o *Mantener presionado* (walkie-talkie).
 - **Pega automáticamente** donde está tu cursor y después restaura lo que tenías en el portapapeles.
 - **Barra flotante neón** con las ondas de tu voz en tiempo real, cronómetro y botón para cancelar (`Esc` también cancela).
-- **Barra flotante a tu gusto** (Ajustes → Barra flotante): 3 diseños (*Neón*, *Cristal* y *Sutil*, negro con tonos blancos), tamaño, transparencia del fondo y opacidad, con vista previa en pantalla.
+- **3 temas de interfaz** (Ajustes → Apariencia): *Neón* (negro con brillo azul), *Cristal* (vidrio azul, claro y luminoso) y *Sutil* (negro con tonos blancos, sin color). Pintan toda la app —fondos, acentos, el orbe del micrófono y el ícono— y el cambio es inmediato, sin reiniciar.
+- **Barra flotante a tu gusto** (Ajustes → Barra flotante): los mismos 3 diseños, tamaño, transparencia del fondo y opacidad, con vista previa en pantalla. Por defecto se pone a juego con el tema; puedes combinarlos como quieras.
 - **Sonidos** al empezar y terminar de grabar, con volumen ajustable.
 - **Historial** con búsqueda, copiar, borrar y exportar a `.txt`.
 - **Whisper large-v3-turbo** con [faster-whisper](https://github.com/SYSTRAN/faster-whisper): en una GPU NVIDIA transcribe ~9 s de audio en ~0.4 s. Si no hay GPU, usa el CPU automáticamente.
@@ -53,6 +54,18 @@ El instalador hace todo solo:
 Después, abre **NeonWhisper** desde el escritorio o búscalo en el menú Inicio. Si mueves la carpeta de lugar, ejecuta `scripts\crear_accesos.bat` para regenerar los accesos directos y el inicio con Windows. Puedes desactivar el inicio automático en Ajustes → Comportamiento.
 
 > **Requisitos:** Windows 10/11 · ~5 GB libres · internet solo para instalar. Recomendado: GPU NVIDIA con drivers recientes (funciona sin GPU, pero más lento).
+
+## Actualizar
+
+Doble clic en **`Actualizar.bat`**. Reemplaza los archivos de la app y deja intactos tus **modelos**, **ajustes** e **historial**; al terminar vuelve a abrir NeonWhisper.
+
+Si el repositorio es privado, primero baja el ZIP (en GitHub, botón verde **Code → Download ZIP**) y déjalo en Descargas: `Actualizar.bat` lo encuentra solo. También puedes pasarle la ruta:
+
+```
+Actualizar.bat -Zip "C:\Users\tu-usuario\Downloads\NeonWhisper-main.zip"
+```
+
+Si tu carpeta es un clon de git, actualízala con `git pull` y `uv sync` en vez de `Actualizar.bat`.
 
 ## Uso
 

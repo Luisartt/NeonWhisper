@@ -43,6 +43,7 @@ class Controller(QObject):
         self.quitting = False
         self.capturing_hotkey = False
         self.settings = Settings.load()
+        self._apply_theme()
         sync_launch_at_startup(self.settings)
         self._reconcile_models()
         self.downloads = DownloadManager(on_change=self.download_changed.emit, on_installed=self.download_installed.emit)
@@ -69,8 +70,6 @@ class Controller(QObject):
         self.transcriber.failed.connect(self.on_failed)
         self.worker_thread.start()
 
-        self.icon_idle = make_app_icon(False)
-        self.icon_active = make_app_icon(True)
         self.window = MainWindow(self)
         self.overlay = Overlay(lambda: self.recorder.level)
         self.overlay.cancel_requested.connect(self.cancel_recording)
@@ -99,6 +98,28 @@ class Controller(QObject):
 
         if not (self.settings.start_minimized or force_minimized):
             self.show_window()
+
+    # --- tema de la interfaz ---------------------------------------------------
+    def _apply_theme(self) -> None:
+        """Aplica el tema guardado a toda la app: hoja de estilos, íconos y la ventana si ya existe."""
+        T.set_theme(self.settings.ui_theme)
+        self.app.setStyleSheet(T.build_stylesheet())
+        self.icon_idle = make_app_icon(False)
+        self.icon_active = make_app_icon(True)
+        self.app.setWindowIcon(self.icon_idle)
+        recording = getattr(self, "recorder", None) and self.recorder.recording
+        if getattr(self, "tray", None):
+            self.tray.setIcon(self.icon_active if recording else self.icon_idle)
+        if getattr(self, "window", None):
+            self.window.restyle()
+
+    def _sync_overlay_style(self) -> None:
+        """Deja la barra flotante con el diseño del mismo nombre que el tema."""
+        if self.settings.overlay_style == self.settings.ui_theme:
+            return
+        self.settings.overlay_style = self.settings.ui_theme
+        self._apply_overlay_look()
+        self.preview_overlay()
 
     # --- bandeja --------------------------------------------------------------
     def _build_tray(self) -> None:
@@ -347,6 +368,13 @@ class Controller(QObject):
             self.window.home.set_hotkey(self.settings.hotkey, value)
         elif key == "launch_at_startup":
             set_launch_at_startup(value)
+        elif key in ("ui_theme", "theme_syncs_overlay"):
+            if key == "ui_theme":
+                self._apply_theme()
+            if self.settings.theme_syncs_overlay:
+                self._sync_overlay_style()
+            self.settings.save()
+            self.window.settings.set_theme_selection(self.settings.ui_theme)
 
     # --- barra flotante --------------------------------------------------------
     def _apply_overlay_look(self) -> None:
@@ -361,6 +389,8 @@ class Controller(QObject):
         defaults = Settings()
         for key in OVERLAY_KEYS:
             setattr(self.settings, key, getattr(defaults, key))
+        if self.settings.theme_syncs_overlay:
+            self.settings.overlay_style = self.settings.ui_theme
         self.settings.save()
         self._apply_overlay_look()
         self.preview_overlay()
@@ -533,8 +563,6 @@ def main() -> None:
     minimized = "--minimized" in sys.argv
     if _already_running(show=not minimized):
         return
-    app.setStyleSheet(T.STYLESHEET)
-    app.setWindowIcon(make_app_icon())
 
     ctl = Controller(app, force_minimized=minimized)
     server = QLocalServer()

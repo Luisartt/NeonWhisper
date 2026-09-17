@@ -1,31 +1,146 @@
-"""Paleta neón azul/negro, tipografías, hoja de estilos y barra de título oscura nativa."""
+"""Temas de la interfaz (Neón, Cristal y Sutil), tipografías, hoja de estilos y barra de título nativa.
+
+Los colores viven en `THEMES` y se copian a las constantes del módulo (`T.CYAN`, `T.BG0`…) cada vez
+que se aplica un tema, para que todo el código siga leyéndolas igual. Los widgets que pintan a mano
+las leen en cada `paintEvent`, así que cambian solos; el resto se refresca con `ui.widgets.restyle`.
+"""
 import ctypes
 import sys
+from dataclasses import dataclass
 
 from PySide6.QtGui import QColor, QFont, QFontDatabase
 
-# --- Paleta -------------------------------------------------------------------
-BG0 = "#03050b"      # fondo más profundo
-BG1 = "#060a14"      # barra lateral
-BG2 = "#08101f"      # tarjetas
-BG3 = "#0c1628"      # hover / inputs
-LINE = "#12203d"
-LINE_HI = "#1b3363"
-TEXT = "#e6f1ff"
-MUTED = "#7d8bb0"
-DIM = "#4a5878"
-CYAN = "#00e5ff"
-ICE = "#7df9ff"
-BLUE = "#2d7dff"
-INDIGO = "#5b5bff"
-DANGER = "#ff4d7a"
-OK = "#3dffc5"
+
+@dataclass(frozen=True)
+class UITheme:
+    key: str
+    name: str
+    description: str
+    # Superficies
+    bg0: str          # fondo de la ventana
+    bg1: str          # barra lateral
+    bg2: str          # tarjetas
+    bg3: str          # hover / botones
+    line: str
+    line_hi: str
+    input_bg: str
+    select_bg: str    # selección en menús y listas
+    hover_bg: str
+    press_bg: str
+    # Texto
+    text: str
+    muted: str
+    dim: str
+    nav_hover: str
+    on_accent: str    # texto sobre un relleno del color de acento
+    # Acentos
+    accent: str       # color principal (CYAN)
+    ice: str          # variante brillante del acento
+    blue: str
+    indigo: str
+    danger: str
+    ok: str
+    # Botón primario
+    primary_from: str
+    primary_to: str
+    primary_hover_from: str
+    primary_hover_to: str
+    # Detalles
+    keycap_bg: str
+    keycap_edge: str
+    titlebar_border: str
+    logo_idle: str
+    logo_active: str
+    orb_hi: str       # centro del orbe mientras grabas
+    orb_hi2: str
+    orb_idle: str
+    orb_mid: str
+    orb_deep: str
+    orb_off: str
+    glow: float       # intensidad de los brillos (1 = neón)
+
+
+THEMES: dict[str, UITheme] = {
+    "neon": UITheme(
+        key="neon", name="Neón", description="Negro profundo con brillo azul",
+        bg0="#03050b", bg1="#060a14", bg2="#08101f", bg3="#0c1628",
+        line="#12203d", line_hi="#1b3363", input_bg="#050912", select_bg="#0f2a55",
+        hover_bg="#0e1c36", press_bg="#0a1428",
+        text="#e6f1ff", muted="#7d8bb0", dim="#4a5878", nav_hover="#cfe9ff", on_accent="#021018",
+        accent="#00e5ff", ice="#7df9ff", blue="#2d7dff", indigo="#5b5bff", danger="#ff4d7a", ok="#3dffc5",
+        primary_from="#2d7dff", primary_to="#00b8e6", primary_hover_from="#4a90ff", primary_hover_to="#00e5ff",
+        keycap_bg="#0a1428", keycap_edge="#0b6f8c", titlebar_border="#0b6f8c",
+        logo_idle="#0b1a38", logo_active="#0a2d52",
+        orb_hi="#0d5d8f", orb_hi2="#07284d", orb_idle="#132f5a", orb_mid="#081327", orb_deep="#02050c",
+        orb_off="#0c1426", glow=1.0,
+    ),
+    "glass": UITheme(
+        key="glass", name="Cristal", description="Vidrio azul, claro y luminoso",
+        bg0="#071227", bg1="#0b1b38", bg2="#102a52", bg3="#1a3c70",
+        line="#24467e", line_hi="#37639f", input_bg="#0c1f3f", select_bg="#1d4380",
+        hover_bg="#1b3f77", press_bg="#16345f",
+        text="#f2fbff", muted="#a9c3e8", dim="#7192bd", nav_hover="#eaf4ff", on_accent="#04172e",
+        accent="#7df9ff", ice="#ffffff", blue="#8fb4ff", indigo="#a99bff", danger="#ff7d9c", ok="#5ef0c0",
+        primary_from="#8fb4ff", primary_to="#7df9ff", primary_hover_from="#a9c6ff", primary_hover_to="#b6fdff",
+        keycap_bg="#14315f", keycap_edge="#5f8fd6", titlebar_border="#3a6cb0",
+        logo_idle="#183a6d", logo_active="#2a68ab",
+        orb_hi="#2f6fb5", orb_hi2="#17396e", orb_idle="#27538f", orb_mid="#122c55", orb_deep="#08182f",
+        orb_off="#16294a", glow=0.8,
+    ),
+    "mono": UITheme(
+        key="mono", name="Sutil", description="Negro con tonos blancos, sin color",
+        bg0="#08080a", bg1="#0c0c0f", bg2="#111114", bg3="#1b1b20",
+        line="#212126", line_hi="#33333a", input_bg="#0a0a0c", select_bg="#2a2a31",
+        hover_bg="#232329", press_bg="#17171b",
+        text="#f2f2f4", muted="#9a9aa4", dim="#6b6b75", nav_hover="#e6e6ea", on_accent="#0a0a0c",
+        accent="#e8e8ec", ice="#ffffff", blue="#9a9aa4", indigo="#7a7a84", danger="#ff8a9e", ok="#ffffff",
+        primary_from="#d4d4da", primary_to="#ffffff", primary_hover_from="#e8e8ee", primary_hover_to="#ffffff",
+        keycap_bg="#17171c", keycap_edge="#5a5a63", titlebar_border="#3a3a42",
+        logo_idle="#1c1c21", logo_active="#3a3a42",
+        orb_hi="#4a4a52", orb_hi2="#232329", orb_idle="#2b2b31", orb_mid="#141418", orb_deep="#050506",
+        orb_off="#131317", glow=0.55,
+    ),
+}
+DEFAULT_THEME = "neon"
+THEME = THEMES[DEFAULT_THEME]
+
+
+# --- Paleta activa ------------------------------------------------------------
+# set_theme() las reescribe; los widgets que pintan a mano las leen como T.CYAN, T.BG0, etc.
+# (los colores que solo usa la hoja de estilos se leen del tema: THEME.input_bg, THEME.keycap_bg…)
+BG0 = BG1 = BG2 = BG3 = LINE = LINE_HI = TEXT = MUTED = DIM = ON_ACCENT = ""
+CYAN = ICE = BLUE = INDIGO = DANGER = OK = ""
+LOGO_IDLE = LOGO_ACTIVE = ORB_HI = ORB_HI2 = ORB_IDLE = ORB_MID = ORB_DEEP = ORB_OFF = ""
+GLOW = 1.0
+
+_ALIASES = {
+    "BG0": "bg0", "BG1": "bg1", "BG2": "bg2", "BG3": "bg3", "LINE": "line", "LINE_HI": "line_hi",
+    "TEXT": "text", "MUTED": "muted", "DIM": "dim", "ON_ACCENT": "on_accent",
+    "CYAN": "accent", "ICE": "ice", "BLUE": "blue", "INDIGO": "indigo", "DANGER": "danger", "OK": "ok",
+    "LOGO_IDLE": "logo_idle", "LOGO_ACTIVE": "logo_active",
+    "ORB_HI": "orb_hi", "ORB_HI2": "orb_hi2", "ORB_IDLE": "orb_idle", "ORB_MID": "orb_mid",
+    "ORB_DEEP": "orb_deep", "ORB_OFF": "orb_off", "GLOW": "glow",
+}
+
+
+def set_theme(key: str) -> UITheme:
+    """Cambia la paleta activa. Después hay que volver a aplicar `build_stylesheet()` y repintar la ventana."""
+    global THEME
+    THEME = THEMES.get(key, THEMES[DEFAULT_THEME])
+    globals().update({name: getattr(THEME, field) for name, field in _ALIASES.items()})
+    return THEME
 
 
 def qc(hex_color: str, alpha: float = 1.0) -> QColor:
     c = QColor(hex_color)
     c.setAlphaF(alpha)
     return c
+
+
+def rgba(hex_color: str, alpha: float) -> str:
+    """Color para la hoja de estilos: rgba(r, g, b, a)."""
+    c = QColor(hex_color)
+    return f"rgba({c.red()}, {c.green()}, {c.blue()}, {alpha:.3f})"
 
 
 # --- Tipografías --------------------------------------------------------------
@@ -78,98 +193,130 @@ class Glyph:
     RETRY = ""
     CLEAR = ""
     PALETTE = ""
+    THEME = ""
 
 
 # --- Hoja de estilos ----------------------------------------------------------
-STYLESHEET = f"""
+def build_stylesheet() -> str:
+    """Hoja de estilos del tema activo. Se vuelve a aplicar al cambiar de tema."""
+    t = THEME
+    g = t.glow
+    return f"""
 * {{ outline: none; }}
-QWidget {{ color: {TEXT}; font-family: "Segoe UI Variable Text", "Segoe UI"; font-size: 10pt; }}
-QMainWindow, #Root {{ background: {BG0}; }}
-#Sidebar {{ background: {BG1}; border-right: 1px solid {LINE}; }}
+QWidget {{ color: {t.text}; font-family: "Segoe UI Variable Text", "Segoe UI"; font-size: 10pt; }}
+QMainWindow, #Root {{ background: {t.bg0}; }}
+#Sidebar {{ background: {t.bg1}; border-right: 1px solid {t.line}; }}
 #Page, QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
+#Sep {{ background: {t.line}; }}
 
 QLabel {{ background: transparent; }}
-QLabel[role="h1"] {{ font-family: "Bahnschrift"; font-size: 24pt; font-weight: 600; color: {TEXT}; }}
-QLabel[role="h2"] {{ font-family: "Bahnschrift"; font-size: 13pt; font-weight: 600; color: {TEXT}; }}
-QLabel[role="eyebrow"] {{ font-family: "Bahnschrift"; font-size: 8.5pt; font-weight: 600; color: {CYAN}; letter-spacing: 2px; padding-top: 3px; }}
-QLabel[role="mini"] {{ font-family: "Bahnschrift"; font-size: 8pt; font-weight: 600; color: {CYAN}; letter-spacing: 1px; padding-top: 3px; }}
-QLabel[role="muted"] {{ color: {MUTED}; }}
-QLabel[role="dim"] {{ color: {DIM}; font-size: 9pt; }}
-QLabel[role="stat"] {{ font-family: "Bahnschrift"; font-size: 20pt; font-weight: 600; color: {ICE}; }}
-QLabel[role="icon"] {{ color: {CYAN}; }}
+QLabel[role="h1"] {{ font-family: "Bahnschrift"; font-size: 24pt; font-weight: 600; color: {t.text}; }}
+QLabel[role="h2"] {{ font-family: "Bahnschrift"; font-size: 13pt; font-weight: 600; color: {t.text}; }}
+QLabel[role="eyebrow"] {{ font-family: "Bahnschrift"; font-size: 8.5pt; font-weight: 600; color: {t.accent}; letter-spacing: 2px; padding-top: 3px; }}
+QLabel[role="mini"] {{ font-family: "Bahnschrift"; font-size: 8pt; font-weight: 600; color: {t.accent}; letter-spacing: 1px; padding-top: 3px; }}
+QLabel[role="muted"] {{ color: {t.muted}; }}
+QLabel[role="dim"] {{ color: {t.dim}; font-size: 9pt; }}
+QLabel[role="stat"] {{ font-family: "Bahnschrift"; font-size: 20pt; font-weight: 600; color: {t.ice}; }}
+QLabel[role="icon"] {{ color: {t.accent}; }}
+QLabel[role="title"] {{ font-size: 10.5pt; font-weight: 600; color: {t.text}; }}
+QLabel[role="strong"] {{ font-weight: 600; color: {t.text}; }}
+QLabel[role="body"] {{ color: {t.text}; font-size: 11pt; }}
+QLabel[role="entry"] {{ color: {t.text}; font-size: 10.5pt; }}
+QLabel[role="status"] {{ color: {t.ice}; }}
+QLabel[role="pct"] {{ font-family: "Bahnschrift"; font-size: 10.5pt; font-weight: 600; color: {t.ice}; }}
+QLabel[role="badge"] {{
+    color: {t.on_accent}; background: {t.accent}; border-radius: 8px; padding: 1px 8px;
+    font-family: "Bahnschrift"; font-size: 8pt; font-weight: 600;
+}}
+QLabel[role="detail"] {{ font-size: 9pt; color: {t.muted}; }}
+QLabel[role="micstatus"] {{ font-size: 10pt; color: {t.muted}; }}
+QLabel[role="dlstatus"] {{ font-size: 8.5pt; color: {t.muted}; }}
+QLabel[tone="ok"] {{ color: {t.ok}; }}
+QLabel[tone="danger"] {{ color: {t.danger}; }}
+QLabel[tone="accent"] {{ color: {t.ice}; }}
+QLabel[tone="muted"] {{ color: {t.muted}; }}
+QLabel#KeyCap {{
+    background: {t.keycap_bg}; color: {t.ice}; border: 1px solid {rgba(t.accent, 0.45)};
+    border-bottom: 3px solid {t.keycap_edge}; border-radius: 8px; padding: 3px 11px;
+    font-family: "Bahnschrift"; font-size: 11pt; font-weight: 600;
+}}
+QLabel#KeyPlus {{ color: {t.dim}; font-size: 11pt; }}
 
-#Card {{ background: {BG2}; border: 1px solid {LINE}; border-radius: 14px; }}
-#Card[glow="true"] {{ border: 1px solid rgba(0, 229, 255, 0.28); }}
+#Card {{ background: {t.bg2}; border: 1px solid {t.line}; border-radius: 14px; }}
+#Card[glow="true"] {{ border: 1px solid {rgba(t.accent, 0.28 * g)}; }}
 
 QPushButton {{
-    background: {BG3}; border: 1px solid {LINE_HI}; border-radius: 10px;
-    padding: 8px 16px; color: {TEXT};
+    background: {t.bg3}; border: 1px solid {t.line_hi}; border-radius: 10px;
+    padding: 8px 16px; color: {t.text};
 }}
-QPushButton:hover {{ border-color: {CYAN}; color: {ICE}; background: #0e1c36; }}
-QPushButton:pressed {{ background: #0a1428; }}
-QPushButton:disabled {{ color: {DIM}; border-color: {LINE}; }}
+QPushButton:hover {{ border-color: {t.accent}; color: {t.ice}; background: {t.hover_bg}; }}
+QPushButton:pressed {{ background: {t.press_bg}; }}
+QPushButton:disabled {{ color: {t.dim}; border-color: {t.line}; }}
 QPushButton[variant="primary"] {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {BLUE}, stop:1 #00b8e6);
-    border: 1px solid rgba(125, 249, 255, 0.55); color: #021018; font-weight: 600;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {t.primary_from}, stop:1 {t.primary_to});
+    border: 1px solid {rgba(t.ice, 0.55)}; color: {t.on_accent}; font-weight: 600;
 }}
-QPushButton[variant="primary"]:hover {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4a90ff, stop:1 {CYAN}); color: #000; }}
-QPushButton[variant="ghost"] {{ background: transparent; border: 1px solid transparent; color: {MUTED}; padding: 6px 10px; }}
-QPushButton[variant="ghost"]:hover {{ color: {ICE}; background: {BG3}; border-color: {LINE_HI}; }}
-QPushButton[variant="danger"]:hover {{ border-color: {DANGER}; color: {DANGER}; }}
+QPushButton[variant="primary"]:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {t.primary_hover_from}, stop:1 {t.primary_hover_to});
+    color: {t.on_accent};
+}}
+QPushButton[variant="ghost"] {{ background: transparent; border: 1px solid transparent; color: {t.muted}; padding: 6px 10px; }}
+QPushButton[variant="ghost"]:hover {{ color: {t.ice}; background: {t.bg3}; border-color: {t.line_hi}; }}
+QPushButton[variant="danger"]:hover {{ border-color: {t.danger}; color: {t.danger}; }}
 
 QPushButton#NavButton {{
     text-align: left; padding: 11px 14px; border-radius: 10px; font-size: 10.5pt;
-    color: {MUTED}; background: transparent; border: 1px solid transparent;
+    color: {t.muted}; background: transparent; border: 1px solid transparent;
 }}
-QPushButton#NavButton:hover {{ background: {BG3}; color: #cfe9ff; }}
+QPushButton#NavButton:hover {{ background: {t.bg3}; color: {t.nav_hover}; }}
 QPushButton#NavButton:checked {{
-    color: {ICE}; border: 1px solid rgba(0, 229, 255, 0.35);
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(0,229,255,0.16), stop:1 rgba(45,125,255,0.03));
+    color: {t.ice}; border: 1px solid {rgba(t.accent, 0.35)};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {rgba(t.accent, 0.16)}, stop:1 {rgba(t.blue, 0.03)});
 }}
 
-QPushButton#Segment {{ border-radius: 0; padding: 8px 16px; color: {MUTED}; background: {BG3}; font-weight: 600; }}
-QPushButton#Segment:checked {{ color: #021018; font-weight: 600; background: {CYAN}; border-color: {CYAN}; }}
+QPushButton#Segment {{ border-radius: 0; padding: 8px 16px; color: {t.muted}; background: {t.bg3}; font-weight: 600; }}
+QPushButton#Segment:checked {{ color: {t.on_accent}; font-weight: 600; background: {t.accent}; border-color: {t.accent}; }}
 QPushButton#Segment[pos="first"] {{ border-top-left-radius: 10px; border-bottom-left-radius: 10px; }}
 QPushButton#Segment[pos="last"] {{ border-top-right-radius: 10px; border-bottom-right-radius: 10px; }}
 
 QLineEdit, QPlainTextEdit {{
-    background: #050912; border: 1px solid {LINE_HI}; border-radius: 10px;
-    padding: 8px 12px; selection-background-color: {BLUE}; color: {TEXT};
+    background: {t.input_bg}; border: 1px solid {t.line_hi}; border-radius: 10px;
+    padding: 8px 12px; selection-background-color: {t.select_bg}; color: {t.text};
 }}
-QLineEdit:focus, QPlainTextEdit:focus {{ border-color: {CYAN}; }}
+QLineEdit:focus, QPlainTextEdit:focus {{ border-color: {t.accent}; }}
 
 QComboBox {{
-    background: #050912; border: 1px solid {LINE_HI}; border-radius: 10px;
-    padding: 7px 12px; min-width: 240px; color: {TEXT};
+    background: {t.input_bg}; border: 1px solid {t.line_hi}; border-radius: 10px;
+    padding: 7px 12px; min-width: 240px; color: {t.text};
 }}
-QComboBox:hover, QComboBox:focus {{ border-color: {CYAN}; }}
+QComboBox:hover, QComboBox:focus {{ border-color: {t.accent}; }}
 QComboBox::drop-down {{ border: none; width: 28px; }}
 QComboBox::down-arrow {{ image: none; width: 0; }}
 QComboBox QAbstractItemView {{
-    background: {BG2}; border: 1px solid {LINE_HI}; padding: 4px;
-    selection-background-color: #0f2a55; selection-color: {ICE}; outline: none;
+    background: {t.bg2}; border: 1px solid {t.line_hi}; padding: 4px;
+    selection-background-color: {t.select_bg}; selection-color: {t.ice}; outline: none;
 }}
 
-QSlider::groove:horizontal {{ height: 4px; background: {LINE_HI}; border-radius: 2px; }}
-QSlider::sub-page:horizontal {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {BLUE}, stop:1 {CYAN}); border-radius: 2px; }}
-QSlider::handle:horizontal {{ width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; background: #e9fcff; border: 2px solid {CYAN}; }}
+QSlider::groove:horizontal {{ height: 4px; background: {t.line_hi}; border-radius: 2px; }}
+QSlider::sub-page:horizontal {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {t.blue}, stop:1 {t.accent}); border-radius: 2px; }}
+QSlider::handle:horizontal {{ width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; background: {t.ice}; border: 2px solid {t.accent}; }}
 
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px; }}
-QScrollBar::handle:vertical {{ background: {LINE_HI}; border-radius: 3px; min-height: 36px; }}
-QScrollBar::handle:vertical:hover {{ background: rgba(0, 229, 255, 0.5); }}
+QScrollBar::handle:vertical {{ background: {t.line_hi}; border-radius: 3px; min-height: 36px; }}
+QScrollBar::handle:vertical:hover {{ background: {rgba(t.accent, 0.5)}; }}
 QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{ height: 0; background: none; }}
 
-QToolTip {{ background: {BG2}; color: {ICE}; border: 1px solid {LINE_HI}; padding: 6px 8px; border-radius: 6px; }}
-QMenu {{ background: {BG2}; border: 1px solid {LINE_HI}; padding: 6px; }}
-QMenu::item {{ padding: 8px 22px; border-radius: 6px; color: {TEXT}; }}
-QMenu::item:selected {{ background: #0f2a55; color: {ICE}; }}
-QMenu::separator {{ height: 1px; background: {LINE}; margin: 6px 8px; }}
-QMessageBox {{ background: {BG1}; }}
+QToolTip {{ background: {t.bg2}; color: {t.ice}; border: 1px solid {t.line_hi}; padding: 6px 8px; border-radius: 6px; }}
+QMenu {{ background: {t.bg2}; border: 1px solid {t.line_hi}; padding: 6px; }}
+QMenu::item {{ padding: 8px 22px; border-radius: 6px; color: {t.text}; }}
+QMenu::item:selected {{ background: {t.select_bg}; color: {t.ice}; }}
+QMenu::separator {{ height: 1px; background: {t.line}; margin: 6px 8px; }}
+QMessageBox {{ background: {t.bg1}; }}
 """
 
 
 def apply_dark_titlebar(hwnd: int) -> None:
-    """Barra de título negra con borde neón (Windows 11; en Windows 10 solo modo oscuro)."""
+    """Barra de título oscura con borde del tema (Windows 11; en Windows 10 solo modo oscuro)."""
     if sys.platform != "win32":
         return
     dwm = ctypes.windll.dwmapi
@@ -182,7 +329,10 @@ def apply_dark_titlebar(hwnd: int) -> None:
         c = QColor(hex_color)
         return c.red() | (c.green() << 8) | (c.blue() << 16)
 
-    set_attr(20, 1)                       # DWMWA_USE_IMMERSIVE_DARK_MODE
-    set_attr(35, colorref(BG1))           # DWMWA_CAPTION_COLOR
-    set_attr(34, colorref("#0b6f8c"))     # DWMWA_BORDER_COLOR
-    set_attr(36, colorref(ICE))           # DWMWA_TEXT_COLOR
+    set_attr(20, 1)                            # DWMWA_USE_IMMERSIVE_DARK_MODE
+    set_attr(35, colorref(THEME.bg1))          # DWMWA_CAPTION_COLOR
+    set_attr(34, colorref(THEME.titlebar_border))  # DWMWA_BORDER_COLOR
+    set_attr(36, colorref(THEME.ice))          # DWMWA_TEXT_COLOR
+
+
+set_theme(DEFAULT_THEME)

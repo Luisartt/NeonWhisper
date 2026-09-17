@@ -37,6 +37,8 @@ class Settings:
     initial_prompt: str = ""
     start_minimized: bool = False
     launch_at_startup: bool = False
+    ui_theme: str = "neon"  # tema de la interfaz: neon | glass | mono (ver ui/theme.py)
+    theme_syncs_overlay: bool = True  # al cambiar de tema, la barra flotante usa el diseño del mismo nombre
     show_overlay: bool = True
     overlay_style: str = "neon"  # neon | glass | mono (ver ui/overlay_styles.py)
     overlay_scale: float = 1.0
