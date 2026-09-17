@@ -25,6 +25,14 @@ FLUSH_SECONDS = 0.5
 STARVE_SECONDS = 2.0  # si una fuente se queda muda tanto tiempo, se escribe la otra sola
 
 
+def device_label(index: int | None) -> str:
+    """Nombre del dispositivo, para decirle al usuario qué se está grabando."""
+    try:
+        return str(sd.query_devices(index, "input")["name"])
+    except Exception:  # noqa: BLE001
+        return "dispositivo desconocido"
+
+
 def find_loopback_device(output_name: str = "") -> int | None:
     """Entrada *loopback* que graba lo que suena en tu PC (la del altavoz en uso, si se puede)."""
     try:
@@ -59,12 +67,13 @@ def to_mono_16k(block: np.ndarray, rate: int) -> np.ndarray:
     return mono.astype(np.float32)
 
 
-class _Source:
+class Source:
     """Una fuente de audio (micrófono o loopback) volcando en un buffer."""
 
-    def __init__(self, device: int | None, loopback: bool = False):
+    def __init__(self, device: int | None, loopback: bool = False, muted: bool = False):
         self.device = device
         self.loopback = loopback
+        self.muted = muted  # silenciada: se sigue leyendo (para no desincronizar) pero no se graba
         self.buffer = np.zeros(0, dtype=np.float32)
         self.level = 0.0
         self.last_block = 0.0
@@ -93,7 +102,7 @@ class _Source:
         block = to_mono_16k(indata.copy(), self._rate)
         with self._lock:
             self.buffer = np.concatenate([self.buffer, block])
-        self.level = level_of(block)
+        self.level = 0.0 if self.muted else level_of(block)
         self.last_block = time.monotonic()
 
     def take(self, count: int) -> np.ndarray:
@@ -121,7 +130,7 @@ class MeetingRecorder:
     """Graba a un .wav hasta que le digas que pare. Devuelve la ruta y la duración."""
 
     def __init__(self):
-        self._sources: list[_Source] = []
+        self._sources: list[Source] = []
         self._wave: wave.Wave_write | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -138,17 +147,48 @@ class MeetingRecorder:
     def elapsed(self) -> float:
         return time.monotonic() - self.started_at if self.recording else 0.0
 
-    def start(self, path: Path, mic: int | None = None, system: bool = True) -> None:
+    # --- qué entra en la grabación -------------------------------------------
+    def _source(self, kind: str) -> "Source | None":
+        """kind: "mic" (tu voz) o "system" (lo que suena en tu PC)."""
+        return next((s for s in self._sources if s.loopback == (kind == "system")), None)
+
+    def is_muted(self, kind: str) -> bool:
+        source = self._source(kind)
+        return True if source is None else source.muted
+
+    def set_muted(self, kind: str, muted: bool) -> None:
+        """Silencia una fuente en caliente: deja de grabarse, pero la otra sigue igual de sincronizada."""
+        source = self._source(kind)
+        if source is not None:
+            source.muted = muted
+            if muted:
+                source.level = 0.0
+            log.info("Reunión: %s %s", kind, "silenciado" if muted else "activo")
+
+    @property
+    def sources(self) -> dict[str, bool]:
+        """Qué fuentes hay y cuáles están grabando ahora mismo."""
+        return {kind: (self._source(kind) is not None and not self.is_muted(kind)) for kind in ("mic", "system")}
+
+    def describe(self) -> str:
+        """«tu micrófono + el audio del sistema», «solo tu micrófono»… para avisos y la interfaz."""
+        names = {"mic": "tu micrófono", "system": "el audio del sistema"}
+        active = [names[k] for k, on in self.sources.items() if on]
+        if not active:
+            return "nada: las dos fuentes están silenciadas"
+        return " + ".join(active) if len(active) > 1 else f"solo {active[0]}"
+
+    def start(self, path: Path, mic: int | None = None, system: bool = True, mic_muted: bool = False) -> None:
         if self.recording:
             return
-        sources = [_Source(mic)]
+        sources = [Source(mic, muted=mic_muted)]
         self.system_audio = False
         if system:
             loopback = find_loopback_device()
             if loopback is None:
                 log.warning("Sin dispositivo loopback: se grabará solo el micrófono")
             else:
-                sources.append(_Source(loopback, loopback=True))
+                sources.append(Source(loopback, loopback=True))
                 self.system_audio = True
         for source in sources:
             try:
@@ -193,7 +233,9 @@ class MeetingRecorder:
             return
         mix = np.zeros(count, dtype=np.float32)
         for source in alive:
-            mix += source.take(count)
+            taken = source.take(count)  # se consume siempre, aunque esté silenciada
+            if not source.muted:
+                mix += taken
         np.clip(mix, -1.0, 1.0, out=mix)
         self.level = level_of(mix[-1600:]) if len(mix) else 0.0
         try:

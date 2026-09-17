@@ -15,7 +15,7 @@ from neonwhisper.audio import device_name, list_input_devices, resolve_input_dev
 from neonwhisper.config import LANGUAGES, MODEL_SIZES, MODELS, SUMMARY_MODELS
 from neonwhisper.fmt import fmt_bytes, fmt_eta, fmt_speed
 from neonwhisper.history import Entry
-from neonwhisper.mictest import MicTester
+from neonwhisper.mictest import MeetingAudioTester, MicTester
 from neonwhisper.paths import DATA_DIR, MODELS_DIR
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.widgets import (
@@ -516,6 +516,26 @@ class MeetingsPage(QWidget):
         live.addLayout(texts, 1)
         self.live_bars = WaveBars(lambda: ctl.meeting_recorder.level, height=34)
         live.addWidget(self.live_bars, 1)
+
+        # Qué se está grabando: se puede silenciar cada fuente en caliente.
+        self.source_buttons: dict[str, QPushButton] = {}
+        picker = QWidget()
+        pl = QHBoxLayout(picker)
+        pl.setContentsMargins(0, 0, 0, 0)
+        pl.setSpacing(0)
+        for pos, (kind, text, glyph) in enumerate((("mic", "Mi voz", T.Glyph.MIC),
+                                                   ("system", "Los demás", T.Glyph.VOLUME))):
+            b = QPushButton(f" {text}")
+            b.setObjectName("Segment")
+            b.setCheckable(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setProperty("pos", "first" if pos == 0 else "last")
+            set_glyph_icon(b, lambda g=glyph, k=kind: glyph_icon(
+                g, color=T.MUTED, checked=T.ON_ACCENT))
+            b.clicked.connect(lambda checked, k=kind: ctl.mute_meeting_source(k, not checked))
+            self.source_buttons[kind] = b
+            pl.addWidget(b)
+        live.addWidget(picker, 0, Qt.AlignmentFlag.AlignVCenter)
         stop = icon_button(T.Glyph.PAUSE, "Detener")
         stop.clicked.connect(ctl.toggle_meeting)
         live.addWidget(stop, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -545,6 +565,13 @@ class MeetingsPage(QWidget):
         self.live.setVisible(active)
         self.record_btn.setText("Detener" if active else "Grabar ahora")
         self.live_bars.set_mode("recording" if active else "idle")
+        sources = recorder.sources if active else {}
+        for kind, button in self.source_buttons.items():
+            available = active and (kind == "mic" or recorder.system_audio)
+            button.setEnabled(available)
+            button.setChecked(bool(sources.get(kind)))
+            button.setToolTip("" if available else "Windows no expone un dispositivo «loopback» en esta PC")
+            repolish(button)
         if active:
             self.live_title.setText(f"Grabando · {meeting.label if meeting else 'reunión'}")
             self._recorder = recorder
@@ -559,8 +586,7 @@ class MeetingsPage(QWidget):
         if recorder is None or not recorder.recording:
             return
         secs = int(recorder.elapsed)
-        source = "micrófono + audio del sistema" if recorder.system_audio else "solo micrófono"
-        self.live_detail.setText(f"{secs // 60}:{secs % 60:02d}   ·   {source}")
+        self.live_detail.setText(f"{secs // 60}:{secs % 60:02d}   ·   grabando {recorder.describe()}")
 
     def set_progress(self, meeting_id: int, text: str) -> None:
         card_widget = self.cards.get(meeting_id)
@@ -806,12 +832,34 @@ class SettingsPage(QWidget):
                   self._toggle(s.meetings_enabled, lambda v: ctl.update_setting("meetings_enabled", v)))
         self._row(sec, "Empezar sin preguntar", "Si lo apagas, solo te avisa y tú le das a Grabar.",
                   self._toggle(s.meeting_auto_start, lambda v: ctl.update_setting("meeting_auto_start", v)))
+        self._row(sec, "Grabar tu micrófono",
+                  "Tu voz en la grabación. Puedes silenciarla en caliente desde la pestaña Reuniones.",
+                  self._toggle(s.meeting_record_mic, lambda v: ctl.update_setting("meeting_record_mic", v)))
         self._row(sec, "Grabar el audio del sistema",
                   "Lo que dicen los demás, además de tu micrófono. Necesita un dispositivo «loopback» "
                   "de Windows; si no lo hay, se graba solo tu micrófono.",
                   self._toggle(s.meeting_capture_system, lambda v: ctl.update_setting("meeting_capture_system", v)))
         self._row(sec, "Conservar el audio", "Guarda el .wav de la reunión. Ocupa ~2 MB por minuto.",
                   self._toggle(s.meeting_keep_audio, lambda v: ctl.update_setting("meeting_keep_audio", v)))
+        # Probar las dos fuentes antes de una reunión de verdad.
+        self.meeting_audio = MeetingAudioTester()
+        self.meeting_audio.changed.connect(self._on_meeting_audio_test)
+        audio_host = QWidget()
+        ah = QHBoxLayout(audio_host)
+        ah.setContentsMargins(0, 0, 0, 0)
+        ah.setSpacing(10)
+        self.meeting_bars = WaveBars(lambda: self.meeting_audio.level, height=34)
+        self.meeting_bars.setFixedWidth(150)
+        self.meeting_test_btn = icon_button(T.Glyph.PLAY, "Probar")
+        self.meeting_test_btn.clicked.connect(self._toggle_meeting_audio_test)
+        ah.addWidget(self.meeting_bars)
+        ah.addWidget(self.meeting_test_btn)
+        self._row(sec, "Probar qué se grabaría",
+                  "Cinco segundos escuchando las dos fuentes: habla y deja sonando un video.", audio_host)
+        self.meeting_audio_status = label("", "micstatus", wrap=True)
+        self.meeting_audio_status.hide()
+        sec.addWidget(self.meeting_audio_status)
+        sec.addWidget(separator())
         self._row(sec, "Resumen automático", "El modelo que escribe el resumen al terminar la reunión.",
                   self._combo({**{"": "Solo transcripción, sin resumen"}, **SUMMARY_MODELS},
                               s.meeting_summary_model,
@@ -1036,6 +1084,28 @@ class SettingsPage(QWidget):
     def stop_mic_test(self) -> None:
         if self.mic_tester.active:
             self.mic_tester.stop()
+        if self.meeting_audio.active:
+            self.meeting_audio.stop()
+
+    # --- prueba del audio de reuniones ---------------------------------------
+    def _toggle_meeting_audio_test(self) -> None:
+        if self.meeting_audio.active:
+            self.meeting_audio.stop()
+            return
+        if self.ctl.recorder.recording or self.ctl.meeting_recorder.recording:
+            return
+        self.mic_tester.stop()
+        s = self.ctl.settings
+        self.meeting_audio.start(resolve_input_device(s.input_device_name, s.input_device))
+
+    def _on_meeting_audio_test(self, state: str, message: str) -> None:
+        active = state == "testing"
+        self.meeting_bars.set_mode("recording" if active else "idle")
+        self.meeting_test_btn.setText("Detener" if active else "Probar")
+        set_tone(self.meeting_audio_status,
+                 {"ok": "ok", "warn": "danger", "error": "danger"}.get(state, "accent"))
+        self.meeting_audio_status.setText(message)
+        self.meeting_audio_status.setVisible(bool(message))
 
     def _on_mic_test(self, state: str, message: str) -> None:
         active = state in ("recording", "playing")

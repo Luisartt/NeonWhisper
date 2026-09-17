@@ -422,6 +422,7 @@ class Controller(QObject):
                 path,
                 mic=resolve_input_device(self.settings.input_device_name, self.settings.input_device),
                 system=self.settings.meeting_capture_system,
+                mic_muted=not self.settings.meeting_record_mic,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("No se pudo empezar a grabar la reunión")
@@ -429,10 +430,15 @@ class Controller(QObject):
             return
         meeting = self.meetings.add(app, title, str(path))
         self._meeting_id = meeting.id
-        detail = "micrófono + audio del sistema" if self.meeting_recorder.system_audio else "solo micrófono"
+        detail = self.meeting_recorder.describe()
         log.info("Grabando reunión %s (%s) en %s", meeting.id, detail, path)
         self.tray.showMessage("NeonWhisper", f"Grabando la reunión de {app} ({detail}).", self.icon_active, 4000)
         self.window.meetings.refresh()
+        self._set_ui_state()
+
+    def mute_meeting_source(self, kind: str, muted: bool) -> None:
+        """Silencia tu micrófono o el audio del sistema mientras se graba la reunión."""
+        self.meeting_recorder.set_muted(kind, muted)
         self._set_ui_state()
 
     def stop_meeting(self) -> None:

@@ -56,6 +56,7 @@ class Settings:
     # --- Reuniones ---
     meetings_enabled: bool = False  # grabar reuniones automáticamente (se activa en Ajustes)
     meeting_auto_start: bool = True  # al detectar la reunión, grabar sin preguntar
+    meeting_record_mic: bool = True  # grabar tu voz (puedes silenciarla en caliente)
     meeting_capture_system: bool = True  # además del micrófono, lo que suena en tu PC
     meeting_keep_audio: bool = False  # conservar el .wav después de transcribir
     meeting_min_seconds: int = 60  # reuniones más cortas que esto se descartan

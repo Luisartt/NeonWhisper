@@ -109,6 +109,8 @@ Actívalo en **Ajustes → Reuniones**. A partir de ahí NeonWhisper vigila si u
 
 Todo queda en la pestaña **Reuniones**: resumen, transcripción cruda, copiar y exportar a `.txt`. El `.wav` se borra al transcribir salvo que actives *Conservar el audio*.
 
+**Tú eliges qué entra.** En la tarjeta de la reunión en curso hay dos botones, *Mi voz* y *Los demás*: los apagas y enciendes mientras grabas, y lo silenciado deja de guardarse sin desincronizar lo otro (útil para una llamada aparte o para no grabarte a ti). Los valores por defecto están en Ajustes → Reuniones, y ahí mismo el botón **Probar** graba cinco segundos y te dice cuánto entró por cada fuente, para no descubrir en la reunión que tu PC no expone el *loopback*.
+
 El modelo del resumen se descarga desde **Ajustes → Reuniones** (Llama 3.2 3B, ~3.2 GB, o 1B, ~1.3 GB). Sin él, igual tienes la transcripción. Es un modelo pequeño: da un resumen decente y ordenado, no esperes nivel GPT-5.
 
 **Avisa a los demás de que estás grabando.** En muchos sitios es obligatorio, y en general es lo correcto.
