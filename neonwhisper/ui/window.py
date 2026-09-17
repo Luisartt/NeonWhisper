@@ -7,12 +7,12 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from neonwhisper import __version__
 from neonwhisper.audio import device_name, list_input_devices, resolve_input_device
-from neonwhisper.config import LANGUAGES, MODEL_SIZES, MODELS
+from neonwhisper.config import LANGUAGES, MODEL_SIZES, MODELS, SUMMARY_MODELS
 from neonwhisper.fmt import fmt_bytes, fmt_eta, fmt_speed
 from neonwhisper.history import Entry
 from neonwhisper.mictest import MicTester
@@ -368,12 +368,235 @@ class HistoryPage(QWidget):
             self.ctl.clear_history()
 
 
+# --- Reuniones ----------------------------------------------------------------
+STATE_TONES = {"grabando": "danger", "transcribiendo": "accent", "resumiendo": "accent", "lista": "ok",
+               "error": "danger"}
+
+
+def summary_html(text: str) -> str:
+    """El resumen viene en markdown sencillo (## títulos y viñetas): se pinta como texto con formato."""
+    lines = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            lines.append("<br>")
+        elif line.startswith("#"):
+            title = line.lstrip("#").strip().upper()
+            lines.append(f"<div style='color:{T.CYAN}; font-family:Bahnschrift; font-size:9pt; "
+                         f"letter-spacing:1px; margin-top:10px;'>{title}</div>")
+        elif line.startswith(("-", "*", "•")):
+            lines.append(f"<div style='margin-left:6px;'>•&nbsp; {line.lstrip('-*• ')}</div>")
+        else:
+            lines.append(f"<div>{line}</div>")
+    return "".join(lines)
+
+
+class MeetingCard(QFrame):
+    """Una reunión en la lista: cabecera con datos y, al desplegarla, resumen y transcripción."""
+
+    def __init__(self, meeting, ctl: "Controller"):
+        super().__init__()
+        self.setObjectName("Card")
+        self.meeting, self.ctl = meeting, ctl
+        self.open = False
+        v = QVBoxLayout(self)
+        v.setContentsMargins(20, 14, 14, 14)
+        v.setSpacing(8)
+
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        titles.addWidget(label(meeting.label, "title"))
+        minutes = meeting.duration / 60
+        meta = f"{human_date(meeting.created_at)}   ·   {minutes:.0f} min   ·   {meeting.words} palabras"
+        titles.addWidget(label(meta, "dim"))
+        top.addLayout(titles, 1)
+
+        self.state = label("", "detail")
+        set_tone(self.state, STATE_TONES.get(meeting.state, "muted"))
+        self.state.setText(meeting.error or meeting.state.capitalize())
+        top.addWidget(self.state, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.toggle = icon_button(T.Glyph.HISTORY, "Ver", variant="ghost", tooltip="Resumen y transcripción")
+        self.toggle.clicked.connect(self._toggle)
+        copy_btn = icon_button(T.Glyph.COPY, variant="ghost", tooltip="Copiar el resumen")
+        copy_btn.clicked.connect(self._copy)
+        export = icon_button(T.Glyph.EXPORT, variant="ghost", tooltip="Guardar como .txt")
+        export.clicked.connect(self._export)
+        delete = icon_button(T.Glyph.DELETE, variant="ghost", tooltip="Borrar la reunión")
+        delete.clicked.connect(self._delete)
+        for b in (self.toggle, copy_btn, export, delete):
+            top.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+        if meeting.state == "error" or (meeting.state == "lista" and not meeting.summary):
+            retry = icon_button(T.Glyph.RETRY, variant="ghost", tooltip="Reintentar")
+            retry.clicked.connect(lambda: ctl.retry_meeting(meeting.id))
+            top.addWidget(retry, 0, Qt.AlignmentFlag.AlignVCenter)
+        v.addLayout(top)
+
+        self.body = QWidget()
+        body = QVBoxLayout(self.body)
+        body.setContentsMargins(0, 8, 0, 0)
+        body.setSpacing(6)
+        if meeting.summary:
+            summary = label("", "body", wrap=True)
+            summary.setTextFormat(Qt.TextFormat.RichText)
+            on_restyle(summary, lambda text=meeting.summary: summary.setText(summary_html(text)))
+            summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            body.addWidget(summary)
+            body.addSpacing(10)
+        body.addWidget(label("TRANSCRIPCIÓN", "eyebrow"))
+        text = QPlainTextEdit(meeting.transcript or "Sin transcripción.")
+        text.setReadOnly(True)
+        text.setMinimumHeight(180)
+        body.addWidget(text)
+        self.body.hide()
+        v.addWidget(self.body)
+
+    def _toggle(self) -> None:
+        self.open = not self.open
+        self.body.setVisible(self.open)
+        self.toggle.setText("Ocultar" if self.open else "Ver")
+
+    def _copy(self) -> None:
+        self.ctl.paster.copy(self.meeting.summary or self.meeting.transcript)
+        flash_check(self.toggle, T.Glyph.HISTORY)
+
+    def _export(self) -> None:
+        name = f"reunion-{self.meeting.created_at[:10]}.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar la reunión", str(os.path.expanduser(f"~/Documents/{name}")), "Texto (*.txt)")
+        if not path:
+            return
+        parts = [f"{self.meeting.label} · {self.meeting.created_at} · {self.meeting.duration / 60:.0f} min"]
+        if self.meeting.summary:
+            parts += ["", "RESUMEN", self.meeting.summary]
+        parts += ["", "TRANSCRIPCIÓN", self.meeting.transcript]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(parts))
+
+    def _delete(self) -> None:
+        if confirm(self, "Borrar reunión", f"¿Borrar «{self.meeting.label}» y su transcripción?", "Borrar"):
+            self.ctl.delete_meeting(self.meeting.id)
+
+
+class MeetingsPage(QWidget):
+    def __init__(self, ctl: "Controller"):
+        super().__init__()
+        self.ctl = ctl
+        self.cards: dict[int, MeetingCard] = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(44, 34, 44, 20)
+        root.setSpacing(16)
+
+        head = QHBoxLayout()
+        head.addLayout(page_header(
+            "GRABADAS EN TU PC", "Reuniones",
+            "NeonWhisper detecta cuándo entras a una reunión, la graba y al terminar te deja la "
+            "transcripción y un resumen."), 1)
+        self.record_btn = icon_button(T.Glyph.MIC, "Grabar ahora", variant="primary")
+        self.record_btn.clicked.connect(ctl.toggle_meeting)
+        head.addWidget(self.record_btn, 0, Qt.AlignmentFlag.AlignBottom)
+        root.addLayout(head)
+
+        # Tarjeta de la reunión en curso.
+        self.live = card(glow=True)
+        live = QHBoxLayout(self.live)
+        live.setContentsMargins(20, 14, 20, 14)
+        live.setSpacing(16)
+        self.live_dot = StatusDot()
+        self.live_dot.state = "recording"
+        live.addWidget(self.live_dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        texts = QVBoxLayout()
+        texts.setSpacing(2)
+        self.live_title = label("Grabando reunión", "title")
+        self.live_detail = label("", "dim")
+        texts.addWidget(self.live_title)
+        texts.addWidget(self.live_detail)
+        live.addLayout(texts, 1)
+        self.live_bars = WaveBars(lambda: ctl.meeting_recorder.level, height=34)
+        live.addWidget(self.live_bars, 1)
+        stop = icon_button(T.Glyph.PAUSE, "Detener")
+        stop.clicked.connect(ctl.toggle_meeting)
+        live.addWidget(stop, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.live.hide()
+        root.addWidget(self.live)
+        self._clock = QTimer(self, interval=1000, timeout=self._tick)
+
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Buscar en tus reuniones…")
+        search_icon = self.search.addAction(glyph_icon(T.Glyph.SEARCH), QLineEdit.ActionPosition.LeadingPosition)
+        on_restyle(self.search, lambda: search_icon.setIcon(glyph_icon(T.Glyph.SEARCH)))
+        self.search.setClearButtonEnabled(True)
+        self._debounce = QTimer(self, singleShot=True, interval=180, timeout=self.refresh)
+        self.search.textChanged.connect(self._debounce.start)
+        root.addWidget(self.search)
+
+        self.list_host = QWidget()
+        self.list_layout = QVBoxLayout(self.list_host)
+        self.list_layout.setContentsMargins(0, 0, 8, 0)
+        self.list_layout.setSpacing(10)
+        root.addWidget(scrollable(self.list_host), 1)
+        self.refresh()
+
+    # --- reunión en curso ----------------------------------------------------
+    def set_live(self, recorder, meeting) -> None:
+        active = recorder.recording
+        self.live.setVisible(active)
+        self.record_btn.setText("Detener" if active else "Grabar ahora")
+        self.live_bars.set_mode("recording" if active else "idle")
+        if active:
+            self.live_title.setText(f"Grabando · {meeting.label if meeting else 'reunión'}")
+            self._recorder = recorder
+            self._tick()
+            if not self._clock.isActive():
+                self._clock.start()
+        else:
+            self._clock.stop()
+
+    def _tick(self) -> None:
+        recorder = getattr(self, "_recorder", None)
+        if recorder is None or not recorder.recording:
+            return
+        secs = int(recorder.elapsed)
+        source = "micrófono + audio del sistema" if recorder.system_audio else "solo micrófono"
+        self.live_detail.setText(f"{secs // 60}:{secs % 60:02d}   ·   {source}")
+
+    def set_progress(self, meeting_id: int, text: str) -> None:
+        card_widget = self.cards.get(meeting_id)
+        if card_widget is not None:
+            card_widget.state.setText(text)
+            set_tone(card_widget.state, "accent")
+
+    # --- lista ---------------------------------------------------------------
+    def refresh(self) -> None:
+        while self.list_layout.count():
+            item = self.list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.cards.clear()
+        query = self.search.text().strip()
+        meetings = self.ctl.meetings.list(query)
+        if not meetings:
+            empty = label(
+                "No hay resultados para tu búsqueda." if query else
+                "Aquí aparecerán tus reuniones. Actívalas en Ajustes › Reuniones. 🎧", "muted")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setMinimumHeight(160)
+            self.list_layout.addWidget(empty)
+        for meeting in meetings:
+            card_widget = MeetingCard(meeting, self.ctl)
+            self.cards[meeting.id] = card_widget
+            self.list_layout.addWidget(card_widget)
+        self.list_layout.addStretch(1)
+
+
 # --- Modelos ------------------------------------------------------------------
 class ModelRow(QWidget):
-    def __init__(self, key: str, ctl: "Controller"):
+    def __init__(self, key: str, ctl: "Controller", summary: bool = False):
         super().__init__()
-        self.key, self.ctl = key, ctl
-        name, _, desc = MODELS[key].partition(" · ")
+        self.key, self.ctl, self.summary = key, ctl, summary
+        name, _, desc = (SUMMARY_MODELS if summary else MODELS)[key].partition(" · ")
         self.name = name
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 12, 0, 12)
@@ -422,10 +645,11 @@ class ModelRow(QWidget):
     def refresh(self) -> None:
         info = self.ctl.downloads.info(self.key)
         state = info.state
-        in_use = state == "installed" and self.ctl.settings.model == self.key
+        chosen = self.ctl.settings.meeting_summary_model if self.summary else self.ctl.settings.model
+        in_use = state == "installed" and chosen == self.key
         self.badge.setVisible(in_use)
         visible = {
-            self.btn_use: state == "installed" and not in_use,
+            self.btn_use: state == "installed" and not in_use and not self.summary,
             self.btn_delete: state == "installed" and not in_use,
             self.btn_download: state == "missing",
             self.btn_pause: state in ("connecting", "downloading"),
@@ -569,6 +793,34 @@ class SettingsPage(QWidget):
         vl.addWidget(slider)
         vl.addWidget(test)
         self._row(sec, "Volumen de sonidos", "", vol, last=True)
+
+        # Reuniones
+        sec = self._section(root, T.Glyph.HISTORY, "Reuniones")
+        sec.addWidget(label(
+            "NeonWhisper mira si una app de reuniones (Teams, Zoom, Meet, Webex, Discord…) está usando tu "
+            "micrófono. Cuando eso pasa, graba tu voz y lo que suena en tu PC, y al terminar transcribe y "
+            "resume, todo en tu computadora. Avisa a los demás de que estás grabando: en muchos sitios es "
+            "obligatorio.", "dim", wrap=True))
+        sec.addSpacing(10)
+        self._row(sec, "Grabar reuniones", "Con esto apagado, NeonWhisper no vigila nada ni graba.",
+                  self._toggle(s.meetings_enabled, lambda v: ctl.update_setting("meetings_enabled", v)))
+        self._row(sec, "Empezar sin preguntar", "Si lo apagas, solo te avisa y tú le das a Grabar.",
+                  self._toggle(s.meeting_auto_start, lambda v: ctl.update_setting("meeting_auto_start", v)))
+        self._row(sec, "Grabar el audio del sistema",
+                  "Lo que dicen los demás, además de tu micrófono. Necesita un dispositivo «loopback» "
+                  "de Windows; si no lo hay, se graba solo tu micrófono.",
+                  self._toggle(s.meeting_capture_system, lambda v: ctl.update_setting("meeting_capture_system", v)))
+        self._row(sec, "Conservar el audio", "Guarda el .wav de la reunión. Ocupa ~2 MB por minuto.",
+                  self._toggle(s.meeting_keep_audio, lambda v: ctl.update_setting("meeting_keep_audio", v)))
+        self._row(sec, "Resumen automático", "El modelo que escribe el resumen al terminar la reunión.",
+                  self._combo({**{"": "Solo transcripción, sin resumen"}, **SUMMARY_MODELS},
+                              s.meeting_summary_model,
+                              lambda v: ctl.update_setting("meeting_summary_model", v)))
+        self.summary_rows: dict[str, ModelRow] = {}
+        for key in SUMMARY_MODELS:
+            sec.addWidget(separator())
+            self.summary_rows[key] = ModelRow(key, ctl, summary=True)
+            sec.addWidget(self.summary_rows[key])
 
         # Apariencia
         sec = self._section(root, T.Glyph.THEME, "Apariencia")
@@ -761,7 +1013,7 @@ class SettingsPage(QWidget):
             style_card.setChecked(True)
 
     def refresh_models(self, key: str | None = None) -> None:
-        for k, row in self.model_rows.items():
+        for k, row in {**self.model_rows, **self.summary_rows}.items():
             if key is None or k == key:
                 row.refresh()
 
@@ -891,11 +1143,13 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.home = HomePage(ctl)
         self.history = HistoryPage(ctl)
+        self.meetings = MeetingsPage(ctl)
         self.settings = SettingsPage(ctl)
         nav_group = QButtonGroup(self)
         for i, (glyph, text, page) in enumerate((
             (T.Glyph.HOME, "Inicio", self.home),
             (T.Glyph.HISTORY, "Historial", self.history),
+            (T.Glyph.MEETING, "Reuniones", self.meetings),
             (T.Glyph.SETTINGS, "Ajustes", self.settings),
         )):
             self.stack.addWidget(page)

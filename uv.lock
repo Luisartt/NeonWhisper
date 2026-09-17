@@ -338,6 +338,7 @@ wheels = [
 name = "neonwhisper"
 source = { editable = "." }
 dependencies = [
+    { name = "ctranslate2" },
     { name = "faster-whisper" },
     { name = "keyboard" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -347,10 +348,12 @@ dependencies = [
     { name = "nvidia-cudnn-cu12", marker = "sys_platform == 'win32'" },
     { name = "pyside6-essentials" },
     { name = "sounddevice" },
+    { name = "tokenizers" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "ctranslate2", specifier = ">=4.4" },
     { name = "faster-whisper", specifier = ">=1.1.1" },
     { name = "keyboard", specifier = ">=0.13.5" },
     { name = "numpy", specifier = ">=1.26" },
@@ -358,6 +361,7 @@ requires-dist = [
     { name = "nvidia-cudnn-cu12", marker = "sys_platform == 'win32'", specifier = ">=9,<10" },
     { name = "pyside6-essentials", specifier = ">=6.7" },
     { name = "sounddevice", specifier = ">=0.5" },
+    { name = "tokenizers", specifier = ">=0.15" },
 ]
 
 [[package]]

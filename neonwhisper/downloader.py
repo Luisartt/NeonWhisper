@@ -27,8 +27,12 @@ REPOS = {  # los mismos repositorios que usa faster-whisper
     "large-v3": "Systran/faster-whisper-large-v3",
     "medium": "Systran/faster-whisper-medium",
     "small": "Systran/faster-whisper-small",
+    # Modelos de texto para resumir reuniones (Llama 3.2 convertido a CTranslate2).
+    "llama-3.2-3b": "jncraton/Llama-3.2-3B-Instruct-ct2-int8",
+    "llama-3.2-1b": "jncraton/Llama-3.2-1B-Instruct-ct2-int8",
 }
-ALLOW_PATTERNS = ("config.json", "preprocessor_config.json", "tokenizer.json", "vocabulary.*", "model.bin")
+ALLOW_PATTERNS = ("config.json", "preprocessor_config.json", "generation_config.json",
+                  "tokenizer.json", "vocabulary.*", "model.bin")
 MANIFEST = ".download.json"
 PARTS = ".parts"
 SEGMENTS = 8

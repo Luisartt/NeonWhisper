@@ -27,6 +27,7 @@
 - **Vocabulario personalizado** para que escriba bien nombres propios y términos técnicos.
 - **Prueba de micrófono**: graba 4 segundos, mide el nivel y te reproduce lo que grabó.
 - **Gestor de modelos**: descarga con barra de progreso, velocidad y tiempo restante; pausa, continúa (incluso después de cerrar la app) o cancela. Usa varias conexiones en paralelo y verifica cada archivo.
+- **Graba tus reuniones solo** (Ajustes → Reuniones): detecta cuándo entras a una reunión de Teams, Zoom, Meet, Webex o Discord, graba tu micrófono **y lo que suena en tu PC**, y al terminar te deja la **transcripción completa** y un **resumen** con temas, decisiones y tareas. Todo en tu computadora.
 - **Programa de verdad**: se instala en Archivos de programa, corre como `NeonWhisper.exe` y aparece en *Aplicaciones instaladas* de Windows, con su botón de desinstalar.
 - **Privado**: tu voz nunca sale de tu computadora.
 
@@ -85,6 +86,7 @@ Quita el programa, sus accesos directos, el inicio con Windows y su registro. An
 | Cancelar | `Esc` o la ✕ de la barra flotante |
 | Cambiar atajo | Ajustes → Atajo de teclado → **Cambiar atajo** y presiona tu combinación |
 | Ver historial | Pestaña **Historial** (buscar, copiar, borrar, exportar) |
+| Grabar una reunión a mano | Pestaña **Reuniones** → **Grabar ahora**, o clic derecho en la bandeja |
 | Salir | Clic derecho en el ícono de la bandeja → **Salir** |
 
 Si dictas con la ventana de NeonWhisper enfocada (por ejemplo, haciendo clic en el micrófono), el texto se **copia** al portapapeles en lugar de pegarse.
@@ -93,6 +95,25 @@ Si dictas con la ventana de NeonWhisper enfocada (por ejemplo, haciendo clic en 
   <img src="docs/settings.png" width="410" alt="Ajustes">
   <img src="docs/history.png" width="410" alt="Historial">
 </p>
+
+## Reuniones
+
+Actívalo en **Ajustes → Reuniones**. A partir de ahí NeonWhisper vigila si una app de reuniones está usando tu micrófono; cuando eso pasa, empieza a grabar y te avisa desde la bandeja.
+
+| Paso | Qué hace |
+| --- | --- |
+| Detectar | Mira qué app tiene el micrófono (lo mismo que el icono de la barra de tareas) y si hay una ventana de videollamada. Tu propio dictado no cuenta. |
+| Grabar | Tu micrófono **y** el audio del sistema, mezclados en un `.wav` de 16 kHz (~2 MB por minuto) que se escribe según llega. |
+| Transcribir | Al terminar, con el mismo Whisper que dicta, de 5 en 5 minutos para que puedas seguir dictando mientras tanto. |
+| Resumir | Un modelo de texto local (Llama 3.2, CTranslate2) escribe el resumen: resumen, temas, decisiones y tareas. |
+
+Todo queda en la pestaña **Reuniones**: resumen, transcripción cruda, copiar y exportar a `.txt`. El `.wav` se borra al transcribir salvo que actives *Conservar el audio*.
+
+El modelo del resumen se descarga desde **Ajustes → Reuniones** (Llama 3.2 3B, ~3.2 GB, o 1B, ~1.3 GB). Sin él, igual tienes la transcripción. Es un modelo pequeño: da un resumen decente y ordenado, no esperes nivel GPT-5.
+
+**Avisa a los demás de que estás grabando.** En muchos sitios es obligatorio, y en general es lo correcto.
+
+> Para grabar lo que dicen los demás hace falta un dispositivo *loopback* de WASAPI (Windows los expone como «Altavoces … [Loopback]»). Si tu equipo no lo tiene, NeonWhisper graba solo tu micrófono y te lo dice en la tarjeta de la reunión.
 
 ## Modelos
 
@@ -103,13 +124,21 @@ Si dictas con la ventana de NeonWhisper enfocada (por ejemplo, haciendo clic en 
 | medium | Alta | Rápida | ~2 GB |
 | small | Media | Rápida incluso en CPU | ~1 GB |
 
+Y para resumir reuniones:
+
+| Modelo | Tamaño | Notas |
+| --- | --- | --- |
+| **llama-3.2-3b** (predeterminado) | ~3.2 GB | Mejor español, resúmenes más finos |
+| llama-3.2-1b | ~1.3 GB | Más rápido y ligero; los resúmenes se notan más flojos |
+
 Se administran en **Ajustes → Modelos de Whisper** (Descargar, Pausar, Continuar, Usar, Eliminar) y se guardan en `%LOCALAPPDATA%\NeonWhisper\models`.
 
 ## Dónde se guardan tus datos
 
 - El programa: `C:\Program Files\NeonWhisper` (o `%LOCALAPPDATA%\Programs\NeonWhisper` con `-PerUser`)
 - Ajustes, historial (`history.db`) y log: `%APPDATA%\NeonWhisper`
-- Modelos de Whisper: `%LOCALAPPDATA%\NeonWhisper\models`
+- Modelos de Whisper y de resumen: `%LOCALAPPDATA%\NeonWhisper\models`
+- Audio de las reuniones mientras se procesan: `%LOCALAPPDATA%\NeonWhisper\meetings`
 
 Nada de esto vive dentro de la carpeta del programa, así que actualizar o reinstalar no se lleva tus cosas por delante. Si junto al programa existe una carpeta `models` (instalaciones portables o anteriores a la v1.3), se sigue usando esa.
 

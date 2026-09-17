@@ -23,10 +23,12 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 HISTORY_DB = DATA_DIR / "history.db"
 LOG_FILE = DATA_DIR / "neonwhisper.log"
 
+MEETINGS_DIR = LOCAL_DIR / "meetings"  # audio de las reuniones mientras se graban
+
 PORTABLE = (APP_DIR / "models").is_dir()
 MODELS_DIR = (APP_DIR / "models") if PORTABLE else (LOCAL_DIR / "models")
 
-for _d in (DATA_DIR, SOUNDS_DIR, MODELS_DIR):
+for _d in (DATA_DIR, SOUNDS_DIR, MODELS_DIR, MEETINGS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 

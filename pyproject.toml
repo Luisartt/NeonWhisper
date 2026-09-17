@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "faster-whisper>=1.1.1",
+    "ctranslate2>=4.4",  # Whisper y el modelo que resume las reuniones
+    "tokenizers>=0.15",
     "PySide6-Essentials>=6.7",
     "sounddevice>=0.5",
     "numpy>=1.26",
