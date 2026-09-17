@@ -55,6 +55,18 @@ Después, abre **NeonWhisper** desde el escritorio o búscalo en el menú Inicio
 
 > **Requisitos:** Windows 10/11 · ~5 GB libres · internet solo para instalar. Recomendado: GPU NVIDIA con drivers recientes (funciona sin GPU, pero más lento).
 
+## Actualizar
+
+Doble clic en **`Actualizar.bat`**. Reemplaza los archivos de la app y deja intactos tus **modelos**, **ajustes** e **historial**; al terminar vuelve a abrir NeonWhisper.
+
+Si el repositorio es privado, primero baja el ZIP (en GitHub, botón verde **Code → Download ZIP**) y déjalo en Descargas: `Actualizar.bat` lo encuentra solo. También puedes pasarle la ruta:
+
+```
+Actualizar.bat -Zip "C:\Users\tu-usuario\Downloads\NeonWhisper-main.zip"
+```
+
+Si tu carpeta es un clon de git, actualízala con `git pull` y `uv sync` en vez de `Actualizar.bat`.
+
 ## Uso
 
 | Acción | Cómo |
