@@ -18,7 +18,7 @@ from neonwhisper.fmt import fmt_eta
 from neonwhisper.history import History
 from neonwhisper.hotkeys import HotkeyManager, is_safe_hotkey
 from neonwhisper.paster import Paster
-from neonwhisper.paths import LOG_FILE, ROOT, model_downloaded
+from neonwhisper.paths import APP_DIR, LOG_FILE, model_downloaded
 from neonwhisper.transcriber import Transcriber
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.overlay import Overlay
@@ -494,8 +494,12 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
 def _startup_command() -> str:
+    """Prefiere NeonWhisper.exe (el programa instalado); si no está, el lanzador .pyw."""
+    launcher = Path(sys.executable).with_name(f"{APP_NAME}.exe")
+    if launcher.is_file():
+        return f'"{launcher}" --minimized'
     pythonw = Path(sys.executable).with_name("pythonw.exe")
-    return f'"{pythonw}" "{ROOT / "NeonWhisper.pyw"}" --minimized'
+    return f'"{pythonw}" "{APP_DIR / "NeonWhisper.pyw"}" --minimized'
 
 
 def get_launch_at_startup() -> str | None:

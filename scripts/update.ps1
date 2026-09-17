@@ -1,6 +1,5 @@
-# Actualizador de NeonWhisper: reemplaza los archivos de la app por los de la ultima version.
-# No toca tus modelos (models\), tu entorno de Python (.venv\, .python\) ni tus ajustes e historial
-# (%APPDATA%\NeonWhisper).
+# Actualizador de NeonWhisper: consigue la ultima version y le pasa la instalacion al instalador.
+# No toca tus ajustes, tu historial ni tus modelos.
 #
 # De donde saca la version nueva, en este orden:
 #   1. El .zip que le pases con -Zip
@@ -8,19 +7,17 @@
 #   3. El .zip mas reciente de NeonWhisper en tu carpeta Descargas
 #      (repositorio privado: entra a GitHub, boton verde Code -> Download ZIP)
 #
-#   -Root <carpeta>  carpeta donde vive NeonWhisper (si no se pasa, se detecta sola)
+#   -Root <carpeta>  carpeta del programa (si no se pasa, se detecta sola)
 #   -Zip <archivo>   usa ese .zip en vez de buscarlo
 #   -Branch <rama>   rama de GitHub a instalar (por defecto main)
 #   -Force           reinstala aunque ya tengas esa version
 param([string]$Root = "", [string]$Zip = "", [string]$Branch = "main", [switch]$Force)
 $ErrorActionPreference = "Stop"
 
+$AppName = "NeonWhisper"
 $RepoUrl = "https://github.com/Luisartt/NeonWhisper"
-# Lo que se reemplaza en cada actualizacion; todo lo demas de la carpeta se queda como esta.
-$AppFiles = @(
-    "neonwhisper", "scripts", "assets", "docs", "pyproject.toml", "uv.lock", "README.md", "LICENSE",
-    "Instalar.bat", "Actualizar.bat", "NeonWhisper.bat", "NeonWhisper.pyw"
-)
+$UninstallKey = "Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName"
+$RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 
 function Step($msg) { Write-Host ""; Write-Host "  >> $msg" -ForegroundColor Cyan }
 function Note($msg) { Write-Host "     $msg" }
@@ -34,24 +31,27 @@ function Get-AppVersion($folder) {
     return ""
 }
 
-function Test-Install($folder) {
-    # Una instalacion de verdad tiene la app y su entorno de Python; una carpeta recien
-    # descomprimida tiene la app pero no el entorno, y no hay que actualizarla a ella.
-    return (Test-Path (Join-Path $folder "neonwhisper\__init__.py")) -and (Test-Path (Join-Path $folder ".venv"))
-}
-
 function Find-Root {
-    # 1. La carpeta de la que cuelga este script (el caso normal: scripts\update.ps1).
+    # 1. Donde Windows tiene registrado el programa.
+    foreach ($hive in @("HKLM:", "HKCU:")) {
+        try {
+            $key = Get-ItemProperty -Path "$hive\$UninstallKey" -ErrorAction Stop
+            if ($key.InstallLocation -and (Test-Path $key.InstallLocation)) { return $key.InstallLocation }
+        } catch {}
+    }
+    # 2. La carpeta de la que cuelga este script, si es una instalacion (tiene su entorno de Python).
     if ($PSScriptRoot) {
         $guess = Split-Path -Parent $PSScriptRoot
-        if (Test-Install $guess) { return $guess }
+        if ((Test-Path (Join-Path $guess "neonwhisper\__init__.py")) -and (Test-Path (Join-Path $guess ".venv"))) {
+            return $guess
+        }
     }
-    # 2. El inicio con Windows, que apunta al lanzador dentro de la carpeta.
+    # 3. Instalaciones anteriores a la v1.3: solo dejaban rastro en el inicio con Windows.
     try {
-        $run = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "NeonWhisper"
-        if ($run.NeonWhisper -match '"([^"]*NeonWhisper\.pyw)"') {
+        $run = (Get-ItemProperty -Path $RunKey -Name $AppName -ErrorAction Stop).$AppName
+        if ($run -match '"([^"]+NeonWhisper\.pyw)"') {
             $guess = Split-Path -Parent $Matches[1]
-            if (Test-Install $guess) { return $guess }
+            if (Test-Path (Join-Path $guess "neonwhisper\__init__.py")) { return $guess }
         }
     } catch {}
     return ""
@@ -132,58 +132,10 @@ try {
         exit 0
     }
 
-    # --- 3. Reemplazar los archivos de la app -------------------------------------
-    Step "Cerrando NeonWhisper si esta abierto..."
-    Get-Process -Name pythonw, python -ErrorAction SilentlyContinue |
-        Where-Object { try { $_.Path -and $_.Path.StartsWith($Root, "OrdinalIgnoreCase") } catch { $false } } |
-        ForEach-Object {
-            $_.CloseMainWindow() | Out-Null
-            Start-Sleep -Milliseconds 400
-            if (-not $_.HasExited) { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-        }
-
-    Step "Copiando los archivos nuevos..."
-    foreach ($item in $AppFiles) {
-        $from = Join-Path $src.FullName $item
-        if (-not (Test-Path $from)) { continue }
-        $to = Join-Path $Root $item
-        if (Test-Path $to -PathType Container) { Remove-Item $to -Recurse -Force }
-        Copy-Item -Path $from -Destination $to -Recurse -Force
-        Note $item
-    }
-    Get-ChildItem -Path (Join-Path $Root "neonwhisper") -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
-    # --- 4. Dependencias y arranque ------------------------------------------------
-    Step "Revisando dependencias..."
-    $uv = (Get-Command uv -ErrorAction SilentlyContinue).Source
-    if (-not $uv) {
-        $local = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
-        if (Test-Path $local) { $uv = $local }
-    }
-    if ($uv) {
-        $env:UV_PYTHON_INSTALL_DIR = Join-Path $Root ".python"
-        Push-Location $Root
-        & $uv sync --python 3.12 --python-preference only-managed
-        Pop-Location
-        if ($LASTEXITCODE -ne 0) { Fail "No se pudieron instalar las dependencias. Ejecuta Instalar.bat." }
-    } else {
-        Note "No encontre uv; si la app no abre, ejecuta Instalar.bat."
-    }
-
-    $python = Join-Path $Root ".venv\Scripts\python.exe"
-    $pythonw = Join-Path $Root ".venv\Scripts\pythonw.exe"
-    if (-not (Test-Path (Join-Path $Root "assets\icon.ico")) -and (Test-Path $python)) {
-        & $python (Join-Path $Root "scripts\make_icon.py")
-    }
-
-    Write-Host ""
-    Write-Host "  Listo: NeonWhisper v$new" -ForegroundColor Green
-    Write-Host "  Tus modelos, ajustes e historial siguen intactos." -ForegroundColor Cyan
-    Write-Host ""
-    if (Test-Path $pythonw) {
-        Start-Process -FilePath $pythonw -ArgumentList "`"$(Join-Path $Root 'NeonWhisper.pyw')`"" -WorkingDirectory $Root
-    }
+    # --- 3. El instalador de la version nueva hace el resto -------------------------
+    # (copia los archivos, revisa dependencias, refresca accesos directos y el registro
+    #  de Windows, y pide permisos de administrador solo si la carpeta los necesita)
+    & (Join-Path $src.FullName "scripts\install.ps1") -Dir $Root
 } finally {
     Remove-Item -Path $temp -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -1,20 +1,32 @@
-"""Rutas de datos del usuario y configuración de DLLs de CUDA."""
+"""Rutas de datos del usuario y configuración de DLLs de CUDA.
+
+La app puede estar instalada en Archivos de programa, donde no se puede escribir. Por eso nada
+se guarda junto al programa: los ajustes y el historial viven en %APPDATA%\\NeonWhisper y los
+modelos en %LOCALAPPDATA%\\NeonWhisper\\models.
+
+Excepción: si junto a la app ya existe una carpeta `models` (instalaciones portables y las
+anteriores a la v1.3), se sigue usando esa, para no volver a descargar varios GB.
+"""
 import os
 import sys
 from pathlib import Path
 
 from neonwhisper import APP_NAME
 
-ROOT = Path(__file__).resolve().parent.parent
-ASSETS = ROOT / "assets"
-MODELS_DIR = ROOT / "models"  # junto a la app: portable y sin symlinks de Hugging Face
+APP_DIR = Path(__file__).resolve().parent.parent  # carpeta donde está instalado el programa
+ROOT = APP_DIR  # nombre anterior, se conserva por compatibilidad
+ASSETS = APP_DIR / "assets"
 DATA_DIR = Path(os.environ.get("APPDATA", Path.home())) / APP_NAME
+LOCAL_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 SOUNDS_DIR = DATA_DIR / "sounds"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 HISTORY_DB = DATA_DIR / "history.db"
 LOG_FILE = DATA_DIR / "neonwhisper.log"
 
-for _d in (DATA_DIR, MODELS_DIR, SOUNDS_DIR):
+PORTABLE = (APP_DIR / "models").is_dir()
+MODELS_DIR = (APP_DIR / "models") if PORTABLE else (LOCAL_DIR / "models")
+
+for _d in (DATA_DIR, SOUNDS_DIR, MODELS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 
