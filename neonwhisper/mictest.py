@@ -1,4 +1,4 @@
-"""Prueba de micrófono: graba unos segundos, mide el nivel y reproduce la grabación."""
+"""Pruebas de audio: el micrófono para dictar, y las dos fuentes que se graban en una reunión."""
 import logging
 import math
 import time
@@ -100,6 +100,100 @@ class MicTester(QObject):
                 self._timer.stop()
                 hint = "  Suena bajo: acércate o sube el volumen del micrófono en Windows." if self._peak < 0.4 else ""
                 self._set("ok", f"✓ Tu micrófono funciona · nivel máximo {int(self._peak * 100)}%.{hint}")
+
+    def _set(self, state: str, message: str) -> None:
+        self.state = state
+        self.changed.emit(state, message)
+
+
+class MeetingAudioTester(QObject):
+    """Comprueba en 5 segundos qué se grabaría de una reunión: tu voz y lo que suena en tu PC.
+
+    Es la forma de saber *antes* de la reunión si Windows expone un dispositivo «loopback»,
+    en vez de descubrirlo al escuchar la grabación.
+    """
+
+    changed = Signal(str, str)  # estado (testing | ok | warn | error | idle), mensaje
+    TEST_SECONDS = 5
+
+    def __init__(self):
+        super().__init__()
+        self.state = "idle"
+        self._sources: dict[str, object] = {}
+        self._peaks = {"mic": 0.0, "system": 0.0}
+        self._started = 0.0
+        self._label = ""
+        self._timer = QTimer(self, interval=100, timeout=self._tick)
+
+    @property
+    def active(self) -> bool:
+        return self.state == "testing"
+
+    @property
+    def level(self) -> float:
+        return max((getattr(s, "level", 0.0) for s in self._sources.values()), default=0.0)
+
+    def start(self, mic_device: int | None) -> None:
+        from neonwhisper.meetings import Source, device_label, find_loopback_device
+
+        self.stop()
+        self._peaks = {"mic": 0.0, "system": 0.0}
+        self._sources = {}
+        try:
+            mic = Source(mic_device)
+            mic.start()
+            self._sources["mic"] = mic
+        except Exception as exc:  # noqa: BLE001
+            log.exception("No se pudo abrir el micrófono para la prueba de reunión")
+            self._set("error", f"No se pudo abrir el micrófono: {str(exc)[:90]}")
+            return
+        loopback = find_loopback_device()
+        self._label = device_label(loopback) if loopback is not None else ""
+        if loopback is not None:
+            try:
+                system = Source(loopback, loopback=True)
+                system.start()
+                self._sources["system"] = system
+            except Exception:  # noqa: BLE001
+                log.exception("No se pudo abrir el loopback para la prueba")
+                self._label = ""
+        self._started = time.monotonic()
+        self._set("testing", f"Habla y pon un video o música…  {self.TEST_SECONDS}")
+        self._timer.start()
+
+    def stop(self) -> None:
+        self._timer.stop()
+        for source in self._sources.values():
+            source.stop()
+        self._sources = {}
+        if self.state == "testing":
+            self._set("idle", "Prueba detenida.")
+
+    def _tick(self) -> None:
+        for kind, source in self._sources.items():
+            self._peaks[kind] = max(self._peaks[kind], source.level)
+        left = self.TEST_SECONDS - (time.monotonic() - self._started)
+        if left > 0:
+            self._set("testing", f"Habla y pon un video o música…  {math.ceil(left)}")
+            return
+        self.stop()
+        self._report()
+
+    def _report(self) -> None:
+        mic_ok = self._peaks["mic"] >= SILENT_PEAK
+        mic = f"{'✓' if mic_ok else '⚠'} Tu micrófono: {int(self._peaks['mic'] * 100)}%"
+        if not self._label:
+            self._set("warn", f"{mic}  ·  ✗ Audio del sistema: Windows no expone aquí un dispositivo "
+                              "«loopback», así que de una reunión solo se grabará tu voz.")
+            return
+        system_ok = self._peaks["system"] >= SILENT_PEAK
+        system = f"{'✓' if system_ok else '⚠'} Audio del sistema: {int(self._peaks['system'] * 100)}% ({self._label})"
+        if mic_ok and system_ok:
+            self._set("ok", f"{mic}  ·  {system}")
+        elif system_ok:
+            self._set("warn", f"{mic} — no se te oyó, revisa el micrófono.  ·  {system}")
+        else:
+            self._set("warn", f"{mic}  ·  {system} — no sonó nada; prueba otra vez con un video puesto.")
 
     def _set(self, state: str, message: str) -> None:
         self.state = state

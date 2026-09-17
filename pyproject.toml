@@ -1,11 +1,13 @@
 [project]
 name = "neonwhisper"
-version = "1.0.0"
+dynamic = ["version"]  # la version la manda neonwhisper/__init__.py
 description = "Dictado por voz 100% local con Whisper: presiona tu atajo, habla y el texto se pega donde está tu cursor."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "faster-whisper>=1.1.1",
+    "ctranslate2>=4.4",  # Whisper y el modelo que resume las reuniones
+    "tokenizers>=0.15",
     "PySide6-Essentials>=6.7",
     "sounddevice>=0.5",
     "numpy>=1.26",
@@ -15,5 +17,17 @@ dependencies = [
     "nvidia-cudnn-cu12>=9,<10; sys_platform == 'win32'",
 ]
 
-[tool.uv]
-package = false
+# Instala el paquete en el entorno: asi uv crea .venv\Scripts\NeonWhisper.exe, el ejecutable
+# que ve Windows (accesos directos, barra de tareas, inicio con Windows).
+[project.gui-scripts]
+NeonWhisper = "neonwhisper.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "neonwhisper/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["neonwhisper"]

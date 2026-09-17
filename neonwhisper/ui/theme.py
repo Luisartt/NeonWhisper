@@ -194,6 +194,7 @@ class Glyph:
     CLEAR = ""
     PALETTE = ""
     THEME = ""
+    MEETING = ""
 
 
 # --- Hoja de estilos ----------------------------------------------------------

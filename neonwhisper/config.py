@@ -11,7 +11,16 @@ MODELS = {
     "small": "Small · muy ligero, para CPU",
 }
 
-MODEL_SIZES = {"large-v3-turbo": "~1.6 GB", "large-v3": "~3 GB", "medium": "~1.5 GB", "small": "~500 MB"}
+MODEL_SIZES = {
+    "large-v3-turbo": "~1.6 GB", "large-v3": "~3 GB", "medium": "~1.5 GB", "small": "~500 MB",
+    "llama-3.2-3b": "~3.2 GB", "llama-3.2-1b": "~1.3 GB",
+}
+
+# Modelos de texto para resumir reuniones (CTranslate2, el mismo motor que Whisper).
+SUMMARY_MODELS = {
+    "llama-3.2-3b": "Llama 3.2 3B · resúmenes más finos (recomendado)",
+    "llama-3.2-1b": "Llama 3.2 1B · más rápido y ligero",
+}
 
 LANGUAGES = {
     "es": "Español",
@@ -44,6 +53,15 @@ class Settings:
     overlay_scale: float = 1.0
     overlay_bg_opacity: float = 0.96  # fondo de la barra (0 = solo ondas y borde)
     overlay_opacity: float = 1.0  # toda la barra
+    # --- Reuniones ---
+    meetings_enabled: bool = False  # grabar reuniones automáticamente (se activa en Ajustes)
+    meeting_auto_start: bool = True  # al detectar la reunión, grabar sin preguntar
+    meeting_record_mic: bool = True  # grabar tu voz (puedes silenciarla en caliente)
+    meeting_capture_system: bool = True  # además del micrófono, lo que suena en tu PC
+    meeting_keep_audio: bool = False  # conservar el .wav después de transcribir
+    meeting_min_seconds: int = 60  # reuniones más cortas que esto se descartan
+    meeting_summary_model: str = "llama-3.2-3b"  # ver SUMMARY_MODELS ("" = solo transcripción)
+    meeting_apps: str = ""  # apps extra que cuentan como reunión, separadas por comas
 
     @classmethod
     def load(cls) -> "Settings":

@@ -1,14 +1,24 @@
 # Crea los accesos directos de NeonWhisper en el escritorio y en el menu Inicio
 # (el menu Inicio es lo que hace que aparezca en la busqueda de Windows).
+#   -Dir        carpeta del programa (por defecto, la de la que cuelga este script)
+#   -AllUsers   deja el acceso del menu Inicio para todos los usuarios de la PC
 #   -Autostart  arranca NeonWhisper minimizado en la bandeja al iniciar sesion
 #   -Launch     abre la app al terminar
-param([switch]$Autostart, [switch]$Launch)
+param([string]$Dir = "", [switch]$AllUsers, [switch]$Autostart, [switch]$Launch)
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent $PSScriptRoot
-$pythonw = Join-Path $Root ".venv\Scripts\pythonw.exe"
-$launcher = Join-Path $Root "NeonWhisper.pyw"
+$Root = if ($Dir) { (Resolve-Path $Dir).Path } else { Split-Path -Parent $PSScriptRoot }
 $icon = Join-Path $Root "assets\icon.ico"
 $AppId = "Luisart.NeonWhisper"  # igual al AppUserModelID de la app: agrupa y fija bien en la barra de tareas
+
+# El ejecutable que genera uv al instalar el paquete; si no esta, el lanzador de Python de siempre.
+$exe = Join-Path $Root ".venv\Scripts\NeonWhisper.exe"
+if (Test-Path $exe) {
+    $target = $exe
+    $arguments = ""
+} else {
+    $target = Join-Path $Root ".venv\Scripts\pythonw.exe"
+    $arguments = "`"$(Join-Path $Root 'NeonWhisper.pyw')`""
+}
 
 Add-Type -TypeDefinition @"
 using System;
@@ -66,15 +76,13 @@ public static class LnkAppId {
 "@
 
 $shell = New-Object -ComObject WScript.Shell
-$targets = @(
-    [Environment]::GetFolderPath("Desktop"),
-    [Environment]::GetFolderPath("Programs")  # menu Inicio del usuario
-)
+$startMenu = if ($AllUsers) { [Environment]::GetFolderPath("CommonPrograms") } else { [Environment]::GetFolderPath("Programs") }
+$targets = @([Environment]::GetFolderPath("Desktop"), $startMenu) | Where-Object { $_ } | Select-Object -Unique
 foreach ($dir in $targets) {
     $path = Join-Path $dir "NeonWhisper.lnk"
     $lnk = $shell.CreateShortcut($path)
-    $lnk.TargetPath = $pythonw
-    $lnk.Arguments = "`"$launcher`""
+    $lnk.TargetPath = $target
+    $lnk.Arguments = $arguments
     $lnk.WorkingDirectory = $Root
     $lnk.IconLocation = "$icon,0"
     $lnk.Description = "Dictado por voz local con Whisper"
@@ -85,10 +93,12 @@ foreach ($dir in $targets) {
 
 if ($Autostart) {
     $run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-    Set-ItemProperty -Path $run -Name "NeonWhisper" -Value "`"$pythonw`" `"$launcher`" --minimized"
+    $command = if ($arguments) { "`"$target`" $arguments --minimized" } else { "`"$target`" --minimized" }
+    Set-ItemProperty -Path $run -Name "NeonWhisper" -Value $command
     Write-Host "     Inicio con Windows: activado (minimizado en la bandeja)"
 }
 
 if ($Launch) {
-    Start-Process -FilePath $pythonw -ArgumentList "`"$launcher`"" -WorkingDirectory $Root
+    if ($arguments) { Start-Process -FilePath $target -ArgumentList $arguments -WorkingDirectory $Root }
+    else { Start-Process -FilePath $target -WorkingDirectory $Root }
 }

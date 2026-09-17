@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import time
+from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QObject, Signal, Slot
@@ -38,6 +39,8 @@ class Transcriber(QObject):
     status_changed = Signal(str, str)
     finished = Signal(str, float, str, float)  # texto, segundos de audio, idioma, segundos de proceso
     failed = Signal(str)
+    chunk_done = Signal(int, int, int, str)   # reunión, tramo, total, texto
+    chunk_failed = Signal(int, str)           # reunión, motivo
 
     def __init__(self):
         super().__init__()
@@ -97,6 +100,38 @@ class Transcriber(QObject):
         noise = (np.random.default_rng(0).standard_normal(32000) * 0.01).astype(np.float32)
         segments, _ = model.transcribe(noise, language="es", beam_size=5, vad_filter=False)
         list(segments)
+
+    # --- reuniones --------------------------------------------------------------
+    @Slot(int, int, int, str, float, float, str, str)
+    def transcribe_chunk(self, meeting_id: int, index: int, total: int, path: str,
+                         offset: float, seconds: float, language: str, prompt: str) -> None:
+        """Un tramo del .wav de una reunión. Se pide de uno en uno para que dictar no espere."""
+        from neonwhisper.meetings.recorder import read_wav
+
+        if self._model is None:
+            self.chunk_failed.emit(meeting_id, "El modelo todavía no está listo")
+            return
+        try:
+            audio = read_wav(Path(path), offset, seconds)
+            if len(audio) < 16000:  # menos de un segundo: nada que sacar
+                self.chunk_done.emit(meeting_id, index, total, "")
+                return
+            segments, _ = self._model.transcribe(
+                audio,
+                language=None if language == "auto" else language,
+                beam_size=5,
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 700},
+                initial_prompt=prompt.strip() or None,
+                condition_on_previous_text=False,
+                without_timestamps=True,
+            )
+            parts = [seg.text.strip() for seg in segments]
+            text = " ".join(p for p in parts if p and not _HALLUCINATIONS.search(p)).strip()
+            self.chunk_done.emit(meeting_id, index, total, text)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Error transcribiendo el tramo %s de la reunión %s", index, meeting_id)
+            self.chunk_failed.emit(meeting_id, str(exc))
 
     # --- transcripción ----------------------------------------------------------
     @Slot(object, str, str)
