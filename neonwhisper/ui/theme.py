@@ -246,8 +246,40 @@ class Glyph:
 
 
 # --- Hoja de estilos ----------------------------------------------------------
+_hojas: dict[str, str] = {}   # una hoja ya armada por tema; se llena la primera vez que se pide
+
+
 def build_stylesheet() -> str:
-    """Hoja de estilos del tema activo. Se vuelve a aplicar al cambiar de tema."""
+    """Hoja de estilos del tema activo, guardada para no volver a armarla en cada cambio.
+
+    Si alguna vez se editan los colores de `THEMES` con la app corriendo, hay que llamar a
+    `clear_stylesheet_cache()`; al arrancar de nuevo se arma sola.
+    """
+    hoja = _hojas.get(THEME.key)
+    if hoja is None:
+        hoja = _hojas[THEME.key] = _build_stylesheet()
+    return hoja
+
+
+def clear_stylesheet_cache() -> None:
+    """Olvida las hojas guardadas: la siguiente vez se vuelven a armar con los colores de ahora."""
+    _hojas.clear()
+
+
+def apply_stylesheet(app) -> None:
+    """Pone la hoja del tema activo en la app, por el camino corto.
+
+    Reemplazar una hoja de estilos de `QApplication` que ya tiene contenido es lo más caro que
+    hace Qt al cambiar de tema: vuelve a «polish» cada widget arrastrando los cachés viejos
+    (≈720 ms en esta ventana). Vaciarla primero suelta el estilo intermedio, y volver a ponerla lo
+    monta limpio: eso cuesta menos de la mitad (≈260 ms) y pinta exactamente igual.
+    """
+    hoja = build_stylesheet()
+    app.setStyleSheet("")
+    app.setStyleSheet(hoja)
+
+
+def _build_stylesheet() -> str:
     t = THEME
     g = t.glow
     rec = t.rec_ink or t.rec  # como texto, el naranja de grabar necesita su versión profunda
@@ -408,8 +440,12 @@ QMessageBox {{ background: {t.bg1}; }}
 
 
 def apply_titlebar(hwnd: int) -> None:
-    """Barra de título con los colores del tema (Windows 11; en Windows 10 solo claro u oscuro)."""
-    if sys.platform != "win32":
+    """Barra de título con los colores del tema (Windows 11; en Windows 10 solo claro u oscuro).
+
+    Con `hwnd` en 0 no hay nada que pintar: pasa cuando la ventana todavía no tiene su hueco
+    nativo. Se sale sin hacer ruido en vez de llamar a Windows con un identificador que no vale.
+    """
+    if sys.platform != "win32" or not hwnd:
         return
     dwm = ctypes.windll.dwmapi
 

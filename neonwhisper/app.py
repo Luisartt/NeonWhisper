@@ -156,7 +156,7 @@ class Controller(QObject):
     def _apply_theme(self) -> None:
         """Aplica el tema guardado a toda la app: hoja de estilos, íconos y la ventana si ya existe."""
         T.set_theme(self.settings.ui_theme)
-        self.app.setStyleSheet(T.build_stylesheet())
+        T.apply_stylesheet(self.app)
         self.icon_idle = make_app_icon(False)
         self.icon_active = make_app_icon(True)
         self.app.setWindowIcon(self.icon_idle)

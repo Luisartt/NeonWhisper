@@ -2071,8 +2071,11 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(make_app_icon())
         restyle(self)
         self.settings.set_theme_selection(self.ctl.settings.ui_theme)
-        if self.isVisible():
-            T.apply_titlebar(int(self.winId()))
+        # internalWinId() en vez de winId(): el segundo CREA el hueco nativo si no lo hay (y lo
+        # vuelve a crear con otro número si Qt lo había soltado), así que pintar la barra de título
+        # podía acabar fabricando una ventana de Windows a espaldas de la app. Si todavía no existe
+        # no hay nada que pintar: ya lo hace showEvent cuando aparece.
+        T.apply_titlebar(self.internalWinId() or 0)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

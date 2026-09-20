@@ -41,11 +41,35 @@ def set_tone(widget: QWidget, tone: str | None) -> None:
 
 
 def restyle(root: QWidget) -> None:
-    """Repinta un árbol de widgets con el tema activo."""
+    """Vuelve a calcular lo que la hoja de estilos no sabe hacer sola: íconos, brillos y HTML.
+
+    Se llama justo después de `theme.apply_stylesheet()`, que ya volvió a «polish» cada widget de
+    la app; repetirlo aquí widget por widget costaba otros ~75 ms y no cambiaba ni un píxel.
+
+    Cada callback va protegido a propósito. Si uno solo se cae —porque apunta a un objeto de C++
+    que Qt ya borró: una fila que se acaba de rehacer, un efecto reemplazado— antes se llevaba por
+    delante el resto del cambio de tema y la ventana se quedaba a medio vestir, con unos colores
+    nuevos y otros viejos. Ahora ese callback se descarta y los demás siguen.
+    """
     for w in (root, *root.findChildren(QWidget)):
-        for fn in getattr(w, "_restyle_fns", ()):
-            fn()
-        repolish(w)
+        try:
+            fns = getattr(w, "_restyle_fns", None)
+        except RuntimeError:
+            continue  # el widget desapareció mientras recorríamos la lista
+        if not fns:
+            continue
+        vivos = []
+        for fn in fns:
+            try:
+                fn()
+            except RuntimeError:
+                continue  # el widget o el efecto del callback ya no existen: se olvida
+            vivos.append(fn)
+        if len(vivos) != len(fns):
+            try:
+                w._restyle_fns = vivos
+            except RuntimeError:
+                pass
 
 
 # --- Íconos -------------------------------------------------------------------
@@ -82,19 +106,43 @@ def paint_logo(p: QPainter, rect: QRectF, active: bool = False) -> None:
             p.drawRoundedRect(QRectF(x, y, w, bh), w / 2, w / 2)
 
 
+# Los íconos solo dependen del tema, así que se pintan una vez por tema y se reparten después.
+# La clave lleva el tema porque los colores vienen de él; al cambiarlo se usa (o se llena) su hueco.
+_iconos_app: dict[tuple[str, bool], QIcon] = {}
+_pixmaps: dict[tuple[str, str, int], QPixmap] = {}
+_iconos_glifo: dict[tuple[str, str, str, str, str, int], QIcon] = {}
+
+
+def clear_icon_cache() -> None:
+    """Olvida los íconos guardados. Solo hace falta si se cambian los colores de un tema en marcha."""
+    _iconos_app.clear()
+    _pixmaps.clear()
+    _iconos_glifo.clear()
+
+
 def make_app_icon(active: bool = False) -> QIcon:
-    icon = QIcon()
+    clave = (T.THEME.key, active)
+    icono = _iconos_app.get(clave)
+    if icono is not None:
+        return icono
+    icono = QIcon()
     for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):
         pm = QPixmap(size, size)
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
         paint_logo(p, QRectF(0, 0, size, size), active)
         p.end()
-        icon.addPixmap(pm)
-    return icon
+        icono.addPixmap(pm)
+    _iconos_app[clave] = icono
+    return icono
 
 
 def glyph_pixmap(glyph: str, color: str, px: int = 18) -> QPixmap:
+    # El color ya viene resuelto a hex, así que sirve de clave por sí solo: no hace falta el tema.
+    clave = (glyph, color, px)
+    pm = _pixmaps.get(clave)
+    if pm is not None:
+        return pm
     dpr = 2.0
     pm = QPixmap(int(px * dpr), int(px * dpr))
     pm.setDevicePixelRatio(dpr)
@@ -107,6 +155,7 @@ def glyph_pixmap(glyph: str, color: str, px: int = 18) -> QPixmap:
     p.setPen(QColor(color))
     p.drawText(QRectF(0, 0, px, px), Qt.AlignmentFlag.AlignCenter, glyph)
     p.end()
+    _pixmaps[clave] = pm
     return pm
 
 
@@ -114,13 +163,19 @@ def glyph_icon(glyph: str, color: str | None = None, hover: str | None = None, c
                px: int = 18) -> QIcon:
     color, hover = color or T.MUTED, hover or T.ICE
     checked = checked or T.ICE
-    icon = QIcon()
-    icon.addPixmap(glyph_pixmap(glyph, color, px), QIcon.Mode.Normal, QIcon.State.Off)
-    icon.addPixmap(glyph_pixmap(glyph, hover, px), QIcon.Mode.Active, QIcon.State.Off)
-    icon.addPixmap(glyph_pixmap(glyph, checked, px), QIcon.Mode.Normal, QIcon.State.On)
-    icon.addPixmap(glyph_pixmap(glyph, checked, px), QIcon.Mode.Active, QIcon.State.On)
-    icon.addPixmap(glyph_pixmap(glyph, T.DIM, px), QIcon.Mode.Disabled, QIcon.State.Off)
-    return icon
+    # T.DIM entra en la clave porque es el color del estado apagado, y cambia con el tema.
+    clave = (glyph, color, hover, checked, T.DIM, px)
+    icono = _iconos_glifo.get(clave)
+    if icono is not None:
+        return icono
+    icono = QIcon()
+    icono.addPixmap(glyph_pixmap(glyph, color, px), QIcon.Mode.Normal, QIcon.State.Off)
+    icono.addPixmap(glyph_pixmap(glyph, hover, px), QIcon.Mode.Active, QIcon.State.Off)
+    icono.addPixmap(glyph_pixmap(glyph, checked, px), QIcon.Mode.Normal, QIcon.State.On)
+    icono.addPixmap(glyph_pixmap(glyph, checked, px), QIcon.Mode.Active, QIcon.State.On)
+    icono.addPixmap(glyph_pixmap(glyph, T.DIM, px), QIcon.Mode.Disabled, QIcon.State.Off)
+    _iconos_glifo[clave] = icono
+    return icono
 
 
 def add_glow(widget: QWidget, color: str | None = None, blur: int = 26, alpha: float = 0.55) -> None:
@@ -129,9 +184,17 @@ def add_glow(widget: QWidget, color: str | None = None, blur: int = 26, alpha: f
     effect.setBlurRadius(blur)
     effect.setOffset(0, 0)
     widget.setGraphicsEffect(effect)
-    on_restyle(widget, lambda: (effect.setBlurRadius(round(blur * max(0.5, T.GLOW))),
-                                effect.setColor(T.qc(color or T.CYAN,
-                                                     alpha * T.GLOW if T.THEME.dark else 0.0))))
+
+    def pintar() -> None:
+        # Se pregunta por el efecto de ahora en vez de recordar el de antes: si alguien le pone
+        # otro al mismo widget, Qt borra el viejo y quedarse con él reventaba el cambio de tema.
+        actual = widget.graphicsEffect()
+        if actual is None:
+            return
+        actual.setBlurRadius(round(blur * max(0.5, T.GLOW)))
+        actual.setColor(T.qc(color or T.CYAN, alpha * T.GLOW if T.THEME.dark else 0.0))
+
+    on_restyle(widget, pintar)
 
 
 def set_glyph_icon(button: QAbstractButton, factory: Callable[[], QIcon]) -> None:
@@ -271,9 +334,16 @@ def add_shadow(widget: QWidget, blur: int = 18, dy: int = 4, alpha: float = 0.05
     effect.setBlurRadius(blur)
     effect.setOffset(0, dy)
     widget.setGraphicsEffect(effect)
-    # Misma geometría en todos los temas; sobre fondo oscuro hay que cargar más la tinta.
-    on_restyle(widget, lambda: effect.setColor(
-        T.qc(T.CYAN if accent else "#000000", alpha * (1.6 if T.THEME.dark else 1.0))))
+
+    def pintar() -> None:
+        # Igual que en add_glow: el efecto se pregunta al widget, no se recuerda.
+        actual = widget.graphicsEffect()
+        if actual is not None:
+            # Misma geometría en todos los temas; sobre fondo oscuro hay que cargar más la tinta.
+            actual.setColor(T.qc(T.CYAN if accent else "#000000",
+                                 alpha * (1.6 if T.THEME.dark else 1.0)))
+
+    on_restyle(widget, pintar)
     return effect
 
 
