@@ -420,7 +420,9 @@ class HomePage(QWidget):
     # --- datos ----------------------------------------------------------------
     def refresh(self) -> None:
         """Vuelve a leer reuniones, notas y dictados. Se llama al entrar a la pestaña."""
-        meetings = self.ctl.meetings.list(limit=20)
+        # list_brief no arrastra transcripciones enteras: el panel solo necesita títulos y notas.
+        store = self.ctl.meetings
+        meetings = (store.list_brief if hasattr(store, "list_brief") else store.list)(limit=20)
         rows = []
         for meeting in meetings[:4]:
             meta = f"{human_date(meeting.created_at)}   ·   {fmt_minutes(meeting.duration)}"
