@@ -25,9 +25,9 @@ WS_EX_TOPMOST = 0x00000008
 
 MARGIN = 16          # espacio para la sombra alrededor de la tarjeta
 CARD_W = 400         # ancho de la tarjeta
-CARD_H = 76          # alto con una línea de título y otra de detalle
-CARD_H_REC = 108     # alto mientras graba: cabe además la sonda de sonido
-RADIUS = 18
+CARD_H = 80          # alto con una línea de título y otra de detalle
+CARD_H_REC = 112     # alto mientras graba: cabe además la sonda de sonido
+RADIUS = T.R_CARD    # el mismo redondeo que las tarjetas de la ventana
 PAD_V = 20           # relleno arriba y abajo de la tarjeta
 DOT_X = 24           # centro del punto de estado, medido desde el borde de la tarjeta
 TEXT_LEFT = 44       # donde empieza el texto: deja libre el halo del punto
@@ -41,15 +41,18 @@ class _CloseButton(QLabel):
 
     def __init__(self):
         super().__init__()
-        self.setFixedSize(26, 26)
+        self.setFixedSize(28, 28)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.setToolTip("Ocultar este aviso")
+        self._hover = False
         self.restyle(False)
 
-    def restyle(self, hover: bool) -> None:
-        self.setPixmap(glyph_pixmap(T.Glyph.CANCEL, T.ICE if hover else T.MUTED, 12))
-        self.setStyleSheet(f"border-radius: 13px; background: {T.rgba(T.CYAN, 0.14) if hover else 'transparent'};")
+    def restyle(self, hover: bool, pressed: bool = False) -> None:
+        self._hover = hover
+        self.setPixmap(glyph_pixmap(T.Glyph.CANCEL, T.ICE if hover or pressed else T.MUTED, 12))
+        fill = T.rgba(T.CYAN, 0.26) if pressed else (T.rgba(T.CYAN, 0.14) if hover else "transparent")
+        self.setStyleSheet(f"border-radius: 14px; background: {fill};")
 
     def enterEvent(self, _):
         self.restyle(True)
@@ -57,7 +60,11 @@ class _CloseButton(QLabel):
     def leaveEvent(self, _):
         self.restyle(False)
 
+    def mousePressEvent(self, _):
+        self.restyle(True, pressed=True)  # sin esto, el único botón del aviso no acusaba el clic
+
     def mouseReleaseEvent(self, _):
+        self.restyle(self._hover)
         self.clicked.emit()
 
 
@@ -68,7 +75,7 @@ class _SoundProbe(QWidget):
     audio del sistema lleva unos segundos en cero, su barra se pone gris y el aviso lo dice.
     """
 
-    LABEL_W = 62
+    LABEL_W = 64
     BAR_W = 120
     BAR_H = 4
     ROW_H = 12
@@ -157,9 +164,9 @@ class MeetingPopup(QWidget):
         row.setContentsMargins(MARGIN + TEXT_LEFT, MARGIN + PAD_V, MARGIN + 12, MARGIN + PAD_V)
         row.setSpacing(12)
         texts = QVBoxLayout()
-        texts.setSpacing(3)
+        texts.setSpacing(4)
         self.title = ElidedLabel("Reunión detectada")
-        self.title.setFixedHeight(17)
+        self.title.setFixedHeight(18)
         self.detail = ElidedLabel()
         self.detail.setFixedHeight(16)
         self.probe = _SoundProbe(self.mic_level, self.system_level)
@@ -174,7 +181,7 @@ class MeetingPopup(QWidget):
         self.action.setProperty("variant", "primary")
         self.action.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.action.setFixedHeight(32)
-        self.action.setMinimumWidth(92)
+        self.action.setMinimumWidth(96)
         self.action.clicked.connect(self._on_action)
         row.addWidget(self.action, 0, Qt.AlignmentFlag.AlignVCenter)
         self.close_btn = _CloseButton()

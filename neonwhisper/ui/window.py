@@ -160,7 +160,11 @@ def page_header(eyebrow: str, title: str, subtitle: str = "") -> QVBoxLayout:
 
 def icon_button(glyph: str, text: str = "", variant: str | None = None, tooltip: str = "") -> QPushButton:
     btn = QPushButton(text)
-    set_glyph_icon(btn, lambda: glyph_icon(glyph, color=T.ON_ACCENT if variant == "primary" else T.MUTED))
+    # En un botón primario el glifo se queda en su color al pasar el ratón: con el de acento
+    # (ICE) desaparecía sobre el relleno morado del tema Pastel.
+    set_glyph_icon(btn, lambda: glyph_icon(
+        glyph, color=T.ON_ACCENT if variant == "primary" else T.MUTED,
+        hover=T.ON_ACCENT if variant == "primary" else T.ICE))
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     if variant:
         btn.setProperty("variant", variant)
@@ -298,6 +302,20 @@ class PanelCard(ClickCard):
         v.addLayout(self.rows)
         v.addStretch(1)
         self.clicked.connect(on_open)
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        self._shadow(12, 2)  # al presionar, la tarjeta se apoya en el fondo
+
+    def mouseReleaseEvent(self, event):
+        self._shadow(24, 6)  # al soltar sigue bajo el ratón: vuelve a la sombra de hover
+        super().mouseReleaseEvent(event)
+
+    def _shadow(self, blur: int, dy: int) -> None:
+        effect = self.graphicsEffect()
+        if effect is not None:
+            effect.setBlurRadius(blur)
+            effect.setOffset(0, dy)
 
     def fill(self, rows: list[QFrame], empty: str) -> None:
         while self.rows.count():
@@ -543,6 +561,7 @@ class EntryCard(QFrame):
         super().__init__()
         self.setObjectName("Card")
         self.setMinimumHeight(88)
+        add_shadow(self)  # la misma sombra suave que el resto de tarjetas de la app
         self.entry, self.ctl = entry, ctl
         v = QVBoxLayout(self)
         v.setContentsMargins(T.CARD_PAD, T.CARD_PAD, ACTION_EDGE, T.CARD_PAD)
@@ -666,6 +685,7 @@ class MeetingCard(QFrame):
         super().__init__()
         self.setObjectName("Card")
         self.setMinimumHeight(88)
+        add_shadow(self)  # la misma sombra suave que el resto de tarjetas de la app
         self.meeting, self.ctl = meeting, ctl
         self.open = False
         v = QVBoxLayout(self)
