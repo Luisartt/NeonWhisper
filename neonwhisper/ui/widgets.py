@@ -373,9 +373,9 @@ class MicOrb(QWidget):
         self._level = 0.0
         self._hover = False
         self._t0 = time.monotonic()
-        self.setMinimumSize(250, 250)
+        self.setMinimumSize(160, 160)  # con 250 fijos la ventana no bajaba del mínimo
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._timer = QTimer(self, interval=16, timeout=self._tick)
         self._timer.start()
 

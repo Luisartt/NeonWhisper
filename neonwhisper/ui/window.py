@@ -71,13 +71,45 @@ def mode_hint(mode: str) -> str:
     return "Presiona para empezar · otra vez para pegar" if mode == "toggle" else "Mantén presionado mientras hablas · suelta para pegar"
 
 
-def scrollable(inner: QWidget) -> QScrollArea:
+def scrollable(inner: QWidget, limit: bool = True) -> QScrollArea:
+    """Área con scroll vertical. En pantallas grandes el contenido no se estira: se centra."""
+    if limit:
+        inner.setMaximumWidth(T.CONTENT_MAX)
     area = QScrollArea()
     area.setWidgetResizable(True)
     area.setFrameShape(QFrame.Shape.NoFrame)
     area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    area.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
     area.setWidget(inner)
     return area
+
+
+def page_body(page: QWidget) -> QVBoxLayout:
+    """Contenido de una página: crece con la ventana pero nunca pasa de CONTENT_MAX."""
+    outer = QHBoxLayout(page)
+    outer.setContentsMargins(0, 0, 0, 0)
+    body = QWidget()
+    body.setMaximumWidth(T.CONTENT_MAX)
+    outer.addWidget(body, 1, Qt.AlignmentFlag.AlignHCenter)
+    return QVBoxLayout(body)
+
+
+def empty_state(glyph: str, text: str) -> QWidget:
+    """Hueco amable: un ícono grande, aire y una frase. Sin emoji pegado al final."""
+    host = QWidget()
+    v = QVBoxLayout(host)
+    v.setContentsMargins(0, 24, 0, 24)
+    v.setSpacing(12)
+    v.addStretch(1)
+    icon = GlyphLabel(glyph, "LINE_HI", 40)
+    v.addWidget(icon, 0, Qt.AlignmentFlag.AlignHCenter)
+    message = label(text, "muted", wrap=True)
+    message.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    message.setMaximumWidth(420)
+    v.addWidget(message, 0, Qt.AlignmentFlag.AlignHCenter)
+    v.addStretch(1)
+    host.setMinimumHeight(220)
+    return host
 
 
 def page_header(eyebrow: str, title: str, subtitle: str = "") -> QVBoxLayout:
@@ -258,7 +290,10 @@ class HomePage(QWidget):
         hero.setSpacing(T.CARD_GAP)
         root.addLayout(hero)
         hero.addWidget(self._dictation_card(), 5)
-        hero.addLayout(self._side_column(), 4)
+        side_host = QWidget()
+        side_host.setMaximumWidth(380)  # en pantallas anchas la columna no se estira
+        side_host.setLayout(self._side_column())
+        hero.addWidget(side_host, 4)
         root.addWidget(self._stats_row())
 
         # Tarjetas clicables: cada una lleva a su pestaña.
@@ -288,8 +323,9 @@ class HomePage(QWidget):
         mic.setSpacing(8)
         level = lambda: ctl.recorder.level  # noqa: E731
         self.orb = MicOrb(level)
-        self.orb.setMinimumSize(160, 160)
-        self.orb.setFixedHeight(172)
+        self.orb.setMinimumSize(160, 176)
+        self.orb.setMaximumHeight(260)  # crece un poco en pantallas grandes, sin comerse el panel
+        self.orb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.orb.clicked.connect(ctl.toggle_recording)
         self.status = QLabel("Cargando Whisper…")
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -322,6 +358,7 @@ class HomePage(QWidget):
 
     def _side_column(self) -> QVBoxLayout:
         side = QVBoxLayout()
+        side.setContentsMargins(0, 0, 0, 0)
         side.setSpacing(T.CARD_GAP)
 
         meeting_card = card()
@@ -460,6 +497,7 @@ class EntryCard(QFrame):
     def __init__(self, entry: Entry, ctl: "Controller"):
         super().__init__()
         self.setObjectName("Card")
+        self.setMinimumHeight(88)
         self.entry, self.ctl = entry, ctl
         v = QVBoxLayout(self)
         v.setContentsMargins(T.CARD_PAD, 16, 16, 18)
@@ -491,7 +529,7 @@ class HistoryPage(QWidget):
     def __init__(self, ctl: "Controller"):
         super().__init__()
         self.ctl = ctl
-        root = QVBoxLayout(self)
+        root = page_body(self)
         root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN, T.PAGE_BOTTOM)
         root.setSpacing(T.SECTION_GAP)
 
@@ -532,13 +570,10 @@ class HistoryPage(QWidget):
         query = self.search.text().strip()
         entries = self.ctl.history.list(query, limit=300)
         if not entries:
-            empty = label(
-                "No hay resultados para tu búsqueda." if query else "Aquí aparecerá todo lo que dictes. 🎙",
-                "muted",
-            )
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setMinimumHeight(160)
-            self.list_layout.addWidget(empty)
+            self.list_layout.addWidget(empty_state(
+                T.Glyph.SEARCH if query else T.Glyph.MIC,
+                "No hay resultados para tu búsqueda." if query else
+                "Aquí aparecerá todo lo que dictes. Presiona tu atajo en cualquier app y habla."))
         for entry in entries:
             self.list_layout.addWidget(EntryCard(entry, self.ctl))
         self.list_layout.addStretch(1)
@@ -584,6 +619,7 @@ class MeetingCard(QFrame):
     def __init__(self, meeting, ctl: "Controller"):
         super().__init__()
         self.setObjectName("Card")
+        self.setMinimumHeight(88)
         self.meeting, self.ctl = meeting, ctl
         self.open = False
         v = QVBoxLayout(self)
@@ -637,7 +673,8 @@ class MeetingCard(QFrame):
         body.addWidget(label("TUS NOTAS", "eyebrow"))
         self.notes = QPlainTextEdit(meeting.notes)
         self.notes.setPlaceholderText("Lo que anotaste en la reunión. Puedes seguir escribiendo aquí.")
-        self.notes.setFixedHeight(90)
+        self.notes.setMinimumHeight(90)
+        self.notes.setMaximumHeight(200)
         self.notes.textChanged.connect(self._save_notes)
         body.addWidget(self.notes)
         body.addSpacing(10)
@@ -689,7 +726,7 @@ class MeetingsPage(QWidget):
         super().__init__()
         self.ctl = ctl
         self.cards: dict[int, MeetingCard] = {}
-        root = QVBoxLayout(self)
+        root = page_body(self)
         root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN, T.PAGE_BOTTOM)
         root.setSpacing(T.SECTION_GAP)
 
@@ -758,7 +795,8 @@ class MeetingsPage(QWidget):
         transcript_box.addWidget(label("EN VIVO", "eyebrow"))
         self.live_view = QPlainTextEdit()
         self.live_view.setReadOnly(True)
-        self.live_view.setFixedHeight(120)
+        self.live_view.setMinimumHeight(120)
+        self.live_view.setMaximumHeight(260)
         self.live_view.setPlaceholderText("La transcripción aparecerá aquí cada ~30 segundos…")
         transcript_box.addWidget(self.live_view)
         panel.addLayout(transcript_box, 1)
@@ -766,7 +804,8 @@ class MeetingsPage(QWidget):
         notes_box.setSpacing(4)
         notes_box.addWidget(label("TUS NOTAS", "eyebrow"))
         self.notes_view = QPlainTextEdit()
-        self.notes_view.setFixedHeight(120)
+        self.notes_view.setMinimumHeight(120)
+        self.notes_view.setMaximumHeight(260)
         self.notes_view.setPlaceholderText("Apunta lo que importa: entra en el resumen final.")
         self.notes_view.textChanged.connect(lambda: ctl.set_meeting_notes(self.notes_view.toPlainText()))
         notes_box.addWidget(self.notes_view)
@@ -891,12 +930,10 @@ class MeetingsPage(QWidget):
         query = self.search.text().strip()
         meetings = self.ctl.meetings.list(query)
         if not meetings:
-            empty = label(
+            self.list_layout.addWidget(empty_state(
+                T.Glyph.SEARCH if query else T.Glyph.MEETING,
                 "No hay resultados para tu búsqueda." if query else
-                "Aquí aparecerán tus reuniones. Actívalas en Ajustes › Reuniones. 🎧", "muted")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setMinimumHeight(160)
-            self.list_layout.addWidget(empty)
+                "Aquí aparecerán tus reuniones. Actívalas en Ajustes › Reuniones."))
         for meeting in meetings:
             card_widget = MeetingCard(meeting, self.ctl)
             self.cards[meeting.id] = card_widget
@@ -1305,12 +1342,16 @@ class SettingsPage(QWidget):
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 14, 0, 14)
         h.setSpacing(26)
-        text = QVBoxLayout()
-        text.setSpacing(3)
+        text_host = QWidget()
+        text_host.setMaximumWidth(520)  # a 1920 px el rótulo quedaba a un metro de su control
+        text = QVBoxLayout(text_host)
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(4)
         text.addWidget(label(title, "title"))
         if desc:
             text.addWidget(label(desc, "dim", wrap=True))
-        h.addLayout(text, 1)
+        h.addWidget(text_host, 1)
+        h.addStretch(0)
         h.addWidget(control, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         section.addWidget(row)
         if not last:
@@ -1502,8 +1543,10 @@ class MainWindow(QMainWindow):
         self.ctl = ctl
         self.setWindowTitle("NeonWhisper")
         self.setWindowIcon(make_app_icon())
-        self.resize(1140, 760)
-        self.setMinimumSize(960, 660)
+        # En 1366x768 o al 150 % de escalado, 1140x760 no cabía: la ventana se ajusta a la pantalla.
+        avail = self.screen().availableGeometry()
+        self.resize(min(1140, avail.width() - 80), min(760, avail.height() - 60))
+        self.setMinimumSize(900, 620)
         self._titlebar_done = False
 
         root = QWidget()
