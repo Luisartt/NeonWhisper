@@ -210,7 +210,7 @@ def stat_tile(title: str) -> tuple[QFrame, QLabel]:
     v.setContentsMargins(18, 14, 18, 14)
     v.setSpacing(0)
     value = label("—", "stat")
-    v.addWidget(ElidedLabel(title, "mini"))
+    v.addWidget(ElidedLabel(title, "eyebrow"))
     v.addWidget(value)
     return tile, value
 
@@ -225,7 +225,7 @@ def panel_row(title: str, meta: str, state: str = "", tone: str | None = None) -
     texts = QVBoxLayout()
     texts.setSpacing(2)
     head = ElidedLabel(title)
-    head.setProperty("role", "strong")
+    head.setProperty("role", "title")
     texts.addWidget(head)
     texts.addWidget(ElidedLabel(meta, "dim"))
     h.addLayout(texts, 1)
@@ -349,7 +349,7 @@ class HomePage(QWidget):
         self.keycaps = KeyCaps(ctl.settings.hotkey)
         hot.addWidget(self.keycaps)
         hot.addStretch(1)
-        self.mode_label = label(mode_hint(ctl.settings.mode), "dim", wrap=True)
+        self.mode_label = label(mode_hint(ctl.settings.mode), "muted", wrap=True)
         self.mode_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.dictate_btn = QPushButton("Dictar ahora")
         self.dictate_btn.setProperty("variant", "hero")
@@ -531,7 +531,7 @@ class EntryCard(QFrame):
         text = QLabel(entry.text)
         text.setWordWrap(True)
         text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        text.setProperty("role", "entry")
+        text.setProperty("role", "body")
         v.addWidget(text)
 
     def _copy(self) -> None:
@@ -648,11 +648,15 @@ class MeetingCard(QFrame):
         minutes = meeting.duration / 60
         meta = f"{human_date(meeting.created_at)}   ·   {minutes:.0f} min   ·   {meeting.words} palabras"
         titles.addWidget(ElidedLabel(meta, "dim"))
+        if meeting.error:
+            reason = label(meeting.error, "muted", wrap=True)
+            set_tone(reason, "danger")
+            titles.addWidget(reason)
         top.addLayout(titles, 1)
 
-        self.state = label("", "detail")
+        # La misma píldora que en el panel de inicio: un estado, un color, el mismo tamaño.
+        self.state = label(meeting.state.capitalize(), "chip")
         set_tone(self.state, STATE_TONES.get(meeting.state, "muted"))
-        self.state.setText(meeting.error or meeting.state.capitalize())
         top.addWidget(self.state, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.toggle = icon_button(T.Glyph.HISTORY, "Ver", variant="ghost", tooltip="Resumen y transcripción")
@@ -1057,7 +1061,7 @@ class ModelRow(QWidget):
         v.addLayout(top)
 
         self.bar = NeonProgress(8)
-        self.detail = label("", "detail")
+        self.detail = label("", "muted")
         v.addWidget(self.bar)
         v.addWidget(self.detail)
         self.refresh()
@@ -1127,7 +1131,7 @@ class SettingsPage(QWidget):
         hl.addWidget(self.keycaps)
         hl.addWidget(self.capture_btn)
         self._row(sec, "Combinación", "Funciona en cualquier app, aunque NeonWhisper esté minimizado.", hot)
-        self.capture_msg = label("", "dim", wrap=True)
+        self.capture_msg = label("", "muted", wrap=True)
         self.capture_msg.hide()
         sec.addWidget(self.capture_msg)
         self.mode_toggle = self._segmented(
@@ -1154,7 +1158,7 @@ class SettingsPage(QWidget):
         sec = self._section(root, T.Glyph.DOWNLOAD, "Modelos de Whisper")
         sec.addWidget(label(
             "Large v3 Turbo es casi tan preciso como Large v3 y varias veces más rápido. "
-            "Puedes pausar una descarga y continuarla después, incluso si cierras la app.", "dim", wrap=True))
+            "Puedes pausar una descarga y continuarla después, incluso si cierras la app.", "muted", wrap=True))
         self.model_rows: dict[str, ModelRow] = {}
         for i, key in enumerate(MODELS):
             if i:
@@ -1191,7 +1195,7 @@ class SettingsPage(QWidget):
         mp.setContentsMargins(0, 0, 0, 14)
         mp.setSpacing(16)
         self.mic_bars = WaveBars(lambda: self.mic_tester.level, height=40)
-        self.mic_status = label("", "micstatus", wrap=True)
+        self.mic_status = label("", "muted", wrap=True)
         self.mic_status.setMinimumWidth(280)
         mp.addWidget(self.mic_bars, 1)
         mp.addWidget(self.mic_status, 1)
@@ -1220,7 +1224,7 @@ class SettingsPage(QWidget):
             "NeonWhisper mira si una app de reuniones (Teams, Zoom, Meet, Webex, Discord…) está usando tu "
             "micrófono. Cuando eso pasa, graba tu voz y lo que suena en tu PC, y al terminar transcribe y "
             "resume, todo en tu computadora. Avisa a los demás de que estás grabando: en muchos sitios es "
-            "obligatorio.", "dim", wrap=True))
+            "obligatorio.", "muted", wrap=True))
         sec.addSpacing(10)
         self._row(sec, "Grabar reuniones", "Con esto apagado, NeonWhisper no vigila nada ni graba.",
                   self._toggle(s.meetings_enabled, lambda v: ctl.update_setting("meetings_enabled", v)))
@@ -1260,7 +1264,7 @@ class SettingsPage(QWidget):
         ah.addWidget(self.meeting_test_btn)
         self._row(sec, "Probar qué se grabaría",
                   "Cinco segundos escuchando las dos fuentes: habla y deja sonando un video.", audio_host)
-        self.meeting_audio_status = label("", "micstatus", wrap=True)
+        self.meeting_audio_status = label("", "muted", wrap=True)
         self.meeting_audio_status.hide()
         sec.addWidget(self.meeting_audio_status)
         sec.addWidget(separator())
@@ -1289,7 +1293,7 @@ class SettingsPage(QWidget):
         # Apariencia
         sec = self._section(root, T.Glyph.THEME, "Apariencia")
         sec.addWidget(label("El tema pinta toda la app: fondos, acentos, el orbe del micrófono y el ícono. "
-                            "El cambio es inmediato, no hace falta reiniciar.", "dim", wrap=True))
+                            "El cambio es inmediato, no hace falta reiniciar.", "muted", wrap=True))
         sec.addSpacing(10)
         theme_host = QWidget()
         theme_cards = CardFlow(186, 12, theme_host)
@@ -1320,8 +1324,8 @@ class SettingsPage(QWidget):
         dv.setContentsMargins(0, 12, 0, 14)
         dv.setSpacing(4)
         dv.addWidget(label("Diseño", "title"))
-        dv.addWidget(label("Al cambiar cualquier opción, la barra aparece unos segundos para que veas cómo queda.", "dim",
-                           wrap=True))
+        dv.addWidget(label("Al cambiar cualquier opción, la barra aparece unos segundos para que veas cómo queda.",
+                           "muted", wrap=True))
         dv.addSpacing(8)
         cards_host = QWidget()
         cards = CardFlow(186, 12, cards_host)
@@ -1419,7 +1423,7 @@ class SettingsPage(QWidget):
         text.setSpacing(4)
         text.addWidget(label(title, "title"))
         if desc:
-            text.addWidget(label(desc, "dim", wrap=True))
+            text.addWidget(label(desc, "muted", wrap=True))
         h.addWidget(text_host, 1)
         h.addStretch(0)
         h.addWidget(control, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -1681,11 +1685,11 @@ class MainWindow(QMainWindow):
         st.addWidget(self.dot, 0, Qt.AlignmentFlag.AlignTop)
         texts = QVBoxLayout()
         texts.setSpacing(1)
-        self.model_title = label("Preparando…", "strong")
+        self.model_title = label("Preparando…", "title")
         self.model_detail = label("", "dim", wrap=True)
         texts.addWidget(self.model_title)
         texts.addWidget(self.model_detail)
-        self.dl_label = label("", "dlstatus", wrap=True)
+        self.dl_label = label("", "muted", wrap=True)
         self.dl_bar = NeonProgress(6)
         texts.addSpacing(6)
         texts.addWidget(self.dl_label)
