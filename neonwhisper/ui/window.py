@@ -249,9 +249,16 @@ class PanelCard(ClickCard):
         head.setSpacing(10)
         head.setContentsMargins(6, 0, 6, 0)
         head.addWidget(GlyphLabel(glyph, "CYAN", 18))
-        head.addWidget(label(title, "h2"))
+        # El título manda: en una tarjeta angosta «Reuniones» se cortaba a media palabra porque
+        # Qt repartía el ancho con el «ver todas». Ese es un adorno (la tarjeta entera es un botón),
+        # así que se encoge él y, si hace falta, desaparece.
+        head_title = label(title, "h2")
+        head_title.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        head.addWidget(head_title)
         head.addStretch(1)
-        head.addWidget(label(hint, "mini"))
+        head_hint = ElidedLabel(hint, "mini")
+        head_hint.setMinimumWidth(0)
+        head.addWidget(head_hint)
         v.addLayout(head)
         self.rows = QVBoxLayout()
         self.rows.setSpacing(2)
