@@ -668,11 +668,13 @@ def summary_html(text: str) -> str:
         if not line:
             lines.append("<br>")
         elif line.startswith("#"):
+            # Mismo aspecto que un rótulo «eyebrow»: Bahnschrift no está en la pila de la app y
+            # dejaba los títulos del resumen con una letra distinta a la de toda la interfaz.
             title = line.lstrip("#").strip().upper()
-            lines.append(f"<div style='color:{T.CYAN}; font-family:Bahnschrift; font-size:9pt; "
-                         f"letter-spacing:1px; margin-top:10px;'>{title}</div>")
+            lines.append(f"<div style='color:{T.CYAN}; font-family:{T.FONT_DISPLAY}; font-size:8.5pt; "
+                         f"font-weight:600; letter-spacing:1.6px; margin-top:{GAP_M}px;'>{title}</div>")
         elif line.startswith(("-", "*", "•")):
-            lines.append(f"<div style='margin-left:6px;'>•&nbsp; {line.lstrip('-*• ')}</div>")
+            lines.append(f"<div style='margin-left:{GAP_XS}px;'>•&nbsp; {line.lstrip('-*• ')}</div>")
         else:
             lines.append(f"<div>{line}</div>")
     return "".join(lines) + "</div>"
