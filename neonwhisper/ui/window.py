@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
+    QBoxLayout, QButtonGroup, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout,
+    QWidget,
 )
 
 from neonwhisper import __version__
@@ -31,6 +32,22 @@ if TYPE_CHECKING:
 
 MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 COMPACT_WIDTH = 820  # por debajo de esto, Reuniones se apila y esconde los iconos en un menú
+
+# --- Escala de espaciado ------------------------------------------------------
+# Todo el aire de la ventana sale de aquí, en múltiplos de 4. Las medidas de página
+# (T.PAGE_MARGIN, T.SECTION_GAP) y de tarjeta (T.CARD_PAD, T.CARD_GAP) viven en el tema;
+# estos son los tramos de dentro, para no volver a escribir números sueltos.
+GAP_XS = 4    # una línea y su apoyo: título → datos, rótulo → campo
+GAP_S = 8     # hermanos apretados dentro de un mismo bloque
+GAP_M = 12    # controles de una misma fila, y sangría de las filas del panel
+GAP_L = 16    # bloques distintos dentro de una tarjeta
+GAP_XL = 24   # el rótulo de una fila de ajustes y su control
+SHADOW_ROOM = GAP_S      # hueco al final de una lista para que no se corte la sombra
+SCROLL_GUTTER = GAP_S    # lo que se le resta al margen derecho por la barra de desplazamiento
+ACTION_EDGE = GAP_L      # margen derecho cuando la fila termina en botones de icono
+CONTROL_H = 36           # alto de un botón secundario (y lado de uno que solo lleva icono)
+WAVE_H = 36              # alto de los medidores de voz
+SLIDER_W = 200           # ancho de los deslizadores de Ajustes
 
 # Color del estado de una reunión (en el panel de inicio y en la lista de Reuniones).
 STATE_TONES = {"grabando": "rec", "transcribiendo": "accent", "resumiendo": "accent", "lista": "ok",
@@ -99,27 +116,40 @@ def page_body(page: QWidget) -> QVBoxLayout:
     return QVBoxLayout(body)
 
 
-def empty_state(glyph: str, text: str) -> QWidget:
-    """Hueco amable: un ícono grande, aire y una frase. Sin emoji pegado al final."""
+def empty_state(glyph: str, text: str, compact: bool = False) -> QWidget:
+    """Hueco amable: un ícono, aire y una frase. La misma pieza en las cuatro páginas.
+
+    En versión `compact` cabe dentro de una tarjeta del panel de inicio, con el mismo tono.
+    """
     host = QWidget()
     v = QVBoxLayout(host)
-    v.setContentsMargins(0, 24, 0, 24)
-    v.setSpacing(12)
+    pad = GAP_M if compact else GAP_XL
+    v.setContentsMargins(0, pad, 0, pad)
+    v.setSpacing(GAP_M)
     v.addStretch(1)
-    icon = GlyphLabel(glyph, "LINE_HI", 40)
-    v.addWidget(icon, 0, Qt.AlignmentFlag.AlignHCenter)
+    v.addWidget(GlyphLabel(glyph, "LINE_HI", 28 if compact else 40), 0, Qt.AlignmentFlag.AlignHCenter)
     message = label(text, "muted", wrap=True)
     message.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-    message.setMaximumWidth(420)
-    v.addWidget(message, 0, Qt.AlignmentFlag.AlignHCenter)
+    if compact:
+        v.addWidget(message)  # en una tarjeta angosta ocupa el ancho entero y el texto va centrado
+    else:
+        # Con una alineación, Qt le daba su ancho «natural» y la frase se cortaba a media palabra.
+        # Los dos espaciadores le dan un ancho de verdad y el tope la deja en una columna legible.
+        message.setMaximumWidth(420)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addStretch(1)
+        row.addWidget(message, 4)
+        row.addStretch(1)
+        v.addLayout(row)
     v.addStretch(1)
-    host.setMinimumHeight(220)
+    host.setMinimumHeight(112 if compact else 220)
     return host
 
 
 def page_header(eyebrow: str, title: str, subtitle: str = "") -> QVBoxLayout:
     box = QVBoxLayout()
-    box.setSpacing(6)
+    box.setSpacing(GAP_XS)
     box.addWidget(label(eyebrow, "eyebrow"))
     h1 = label(title, "h1")
     box.addWidget(h1)
@@ -136,13 +166,13 @@ def icon_button(glyph: str, text: str = "", variant: str | None = None, tooltip:
         btn.setProperty("variant", variant)
     if tooltip:
         btn.setToolTip(tooltip)
-    if not text:  # solo el ícono: cuadrado de 34, que es lo mínimo cómodo para el ratón
-        btn.setFixedSize(34, 34)
+    if not text:  # solo el ícono: el mismo cuadrado que el alto de un botón con texto
+        btn.setFixedSize(CONTROL_H, CONTROL_H)
     elif variant == "primary":
-        btn.setMinimumHeight(40)
+        btn.setMinimumHeight(CONTROL_H + GAP_XS)
         add_shadow(btn, blur=14, dy=3, alpha=0.18, accent=True)
     else:
-        btn.setMinimumHeight(36)
+        btn.setMinimumHeight(CONTROL_H)
     return btn
 
 
@@ -207,7 +237,7 @@ def stat_tile(title: str) -> tuple[QFrame, QLabel]:
     tile = card()
     tile.setFixedHeight(96)
     v = QVBoxLayout(tile)
-    v.setContentsMargins(18, 14, 18, 14)
+    v.setContentsMargins(GAP_L, GAP_L, GAP_L, GAP_L)
     v.setSpacing(0)
     value = label("—", "stat")
     v.addWidget(ElidedLabel(title, "eyebrow"))
@@ -220,10 +250,10 @@ def panel_row(title: str, meta: str, state: str = "", tone: str | None = None) -
     row = QFrame()
     row.setObjectName("Row")
     h = QHBoxLayout(row)
-    h.setContentsMargins(12, 9, 12, 9)
-    h.setSpacing(12)
+    h.setContentsMargins(GAP_S, GAP_S, GAP_S, GAP_S)
+    h.setSpacing(GAP_M)
     texts = QVBoxLayout()
-    texts.setSpacing(2)
+    texts.setSpacing(GAP_XS)
     head = ElidedLabel(title)
     head.setProperty("role", "title")
     texts.addWidget(head)
@@ -241,13 +271,16 @@ class PanelCard(ClickCard):
 
     def __init__(self, glyph: str, title: str, hint: str, on_open) -> None:
         super().__init__()
+        self._glyph = glyph
         self.setMinimumHeight(212)
+        # El margen de la tarjeta más la sangría de las filas suman el relleno de siempre: así el
+        # ícono del encabezado y los títulos de las filas caen en la misma vertical.
         v = QVBoxLayout(self)
-        v.setContentsMargins(16, 18, 16, 16)
-        v.setSpacing(10)
+        v.setContentsMargins(GAP_M, T.CARD_PAD, GAP_M, T.CARD_PAD)
+        v.setSpacing(GAP_M)
         head = QHBoxLayout()
-        head.setSpacing(10)
-        head.setContentsMargins(6, 0, 6, 0)
+        head.setSpacing(GAP_M)
+        head.setContentsMargins(GAP_S, 0, GAP_S, 0)
         head.addWidget(GlyphLabel(glyph, "CYAN", 18))
         # El título manda: en una tarjeta angosta «Reuniones» se cortaba a media palabra porque
         # Qt repartía el ancho con el «ver todas». Ese es un adorno (la tarjeta entera es un botón),
@@ -261,7 +294,7 @@ class PanelCard(ClickCard):
         head.addWidget(head_hint)
         v.addLayout(head)
         self.rows = QVBoxLayout()
-        self.rows.setSpacing(2)
+        self.rows.setSpacing(GAP_XS)
         v.addLayout(self.rows)
         v.addStretch(1)
         self.clicked.connect(on_open)
@@ -274,9 +307,7 @@ class PanelCard(ClickCard):
                 old.setParent(None)  # sin esto se sigue viendo hasta que Qt lo borra
                 old.deleteLater()
         if not rows:
-            blank = label(empty, "muted", wrap=True)
-            blank.setContentsMargins(12, 10, 12, 10)
-            self.rows.addWidget(blank)
+            self.rows.addWidget(empty_state(self._glyph, empty, compact=True))
         for row in rows:
             self.rows.addWidget(row)
 
@@ -290,7 +321,7 @@ class HomePage(QWidget):
         self._last = ""
         inner = QWidget()
         root = QVBoxLayout(inner)
-        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN - 8, T.PAGE_BOTTOM)
+        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN - SCROLL_GUTTER, T.PAGE_BOTTOM)
         root.setSpacing(T.SECTION_GAP)
         root.addLayout(page_header(
             "TODO EN TU PC · WHISPER",
@@ -311,7 +342,7 @@ class HomePage(QWidget):
         # Tarjetas clicables: cada una lleva a su pestaña.
         panels_host = QWidget()
         panels = CardFlow(250, T.CARD_GAP, panels_host)
-        panels.setContentsMargins(0, 0, 0, 10)  # aire para la sombra de la última fila
+        panels.setContentsMargins(0, 0, 0, SHADOW_ROOM)  # aire para la sombra de la última fila
         self.meetings_card = PanelCard(T.Glyph.MEETING, "Reuniones", "VER TODAS  ›", lambda: self._go(2))
         self.notes_card = PanelCard(T.Glyph.PASTE, "Tus notas", "ABRIR  ›", lambda: self._go(2))
         self.dictations_card = PanelCard(T.Glyph.HISTORY, "Dictados", "VER TODOS  ›", lambda: self._go(1))
@@ -331,8 +362,8 @@ class HomePage(QWidget):
         mic_card = card(glow=True)
         mic_card.setObjectName("Hero")  # radio más generoso que el resto de tarjetas
         mic = QVBoxLayout(mic_card)
-        mic.setContentsMargins(T.CARD_PAD, 16, T.CARD_PAD, 18)
-        mic.setSpacing(8)
+        mic.setContentsMargins(T.CARD_PAD, T.CARD_PAD, T.CARD_PAD, T.CARD_PAD)
+        mic.setSpacing(GAP_S)
         level = lambda: ctl.recorder.level  # noqa: E731
         self.orb = MicOrb(level)
         self.orb.setMinimumSize(160, 176)
@@ -343,7 +374,7 @@ class HomePage(QWidget):
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status.setProperty("role", "status")
         add_glow(self.status, blur=22, alpha=0.45)
-        self.bars = WaveBars(level, height=34)
+        self.bars = WaveBars(level, height=WAVE_H)
         hot = QHBoxLayout()
         hot.addStretch(1)
         self.keycaps = KeyCaps(ctl.settings.hotkey)
@@ -361,7 +392,7 @@ class HomePage(QWidget):
         mic.addWidget(self.orb)
         mic.addWidget(self.status)
         mic.addWidget(self.bars)
-        mic.addSpacing(6)
+        mic.addSpacing(GAP_S)
         mic.addLayout(hot)
         mic.addWidget(self.mode_label)
         mic.addStretch(1)
@@ -375,10 +406,10 @@ class HomePage(QWidget):
 
         meeting_card = card()
         mv = QVBoxLayout(meeting_card)
-        mv.setContentsMargins(T.CARD_PAD, 18, T.CARD_PAD, 20)
-        mv.setSpacing(10)
+        mv.setContentsMargins(T.CARD_PAD, T.CARD_PAD, T.CARD_PAD, T.CARD_PAD)
+        mv.setSpacing(GAP_M)
         head = QHBoxLayout()
-        head.setSpacing(10)
+        head.setSpacing(GAP_M)
         head.addWidget(GlyphLabel(T.Glyph.MEETING, "CYAN", 18))
         head.addWidget(label("Reuniones", "h2"))
         head.addStretch(1)
@@ -394,8 +425,8 @@ class HomePage(QWidget):
 
         last = card()
         lv = QVBoxLayout(last)
-        lv.setContentsMargins(T.CARD_PAD, 20, T.CARD_PAD, 20)
-        lv.setSpacing(10)
+        lv.setContentsMargins(T.CARD_PAD, T.CARD_PAD, T.CARD_PAD, T.CARD_PAD)
+        lv.setSpacing(GAP_M)
         top = QHBoxLayout()
         top.addWidget(label("ÚLTIMA TRANSCRIPCIÓN", "eyebrow"))
         top.addStretch(1)
@@ -415,7 +446,7 @@ class HomePage(QWidget):
     def _stats_row(self) -> QWidget:
         host = QWidget()
         tiles = CardFlow(138, T.CARD_GAP, host)
-        tiles.setContentsMargins(0, 0, 0, 8)  # aire para la sombra
+        tiles.setContentsMargins(0, 0, 0, SHADOW_ROOM)  # aire para la sombra
         self.tiles: dict[str, QLabel] = {}
         for key, title in (("dictados", "DICTADOS"), ("palabras", "PALABRAS"),
                            ("reuniones", "REUNIONES"), ("tiempo", "TIEMPO GRABADO")):
@@ -514,8 +545,8 @@ class EntryCard(QFrame):
         self.setMinimumHeight(88)
         self.entry, self.ctl = entry, ctl
         v = QVBoxLayout(self)
-        v.setContentsMargins(T.CARD_PAD, 16, 16, 18)
-        v.setSpacing(8)
+        v.setContentsMargins(T.CARD_PAD, T.CARD_PAD, ACTION_EDGE, T.CARD_PAD)
+        v.setSpacing(GAP_S)
         top = QHBoxLayout()
         words = len(entry.text.split())
         meta = f"{human_date(entry.created_at)}   ·   {entry.duration:.0f} s   ·   {words} palabra{'s' if words != 1 else ''}"
@@ -544,12 +575,13 @@ class HistoryPage(QWidget):
         super().__init__()
         self.ctl = ctl
         root = page_body(self)
-        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN, T.PAGE_BOTTOM)
+        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN - SCROLL_GUTTER, T.PAGE_BOTTOM)
         root.setSpacing(T.SECTION_GAP)
 
         head = QHBoxLayout()
-        head.setSpacing(12)
-        head.addLayout(page_header("TUS DICTADOS", "Historial"), 1)
+        head.setSpacing(GAP_L)
+        head.addLayout(page_header("TUS DICTADOS", "Historial",
+                                   "Todo lo que dictas con tu atajo se guarda aquí, en tu PC."), 1)
         export = icon_button(T.Glyph.EXPORT, "Exportar")
         export.clicked.connect(self._export)
         clear = icon_button(T.Glyph.CLEAR, "Borrar todo", variant="danger")
@@ -569,7 +601,7 @@ class HistoryPage(QWidget):
 
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
-        self.list_layout.setContentsMargins(0, 2, 10, 6)
+        self.list_layout.setContentsMargins(0, 0, 0, SHADOW_ROOM)
         self.list_layout.setSpacing(T.CARD_GAP)
         root.addWidget(scrollable(self.list_host), 1)
         self.refresh()
@@ -637,13 +669,13 @@ class MeetingCard(QFrame):
         self.meeting, self.ctl = meeting, ctl
         self.open = False
         v = QVBoxLayout(self)
-        v.setContentsMargins(T.CARD_PAD, 18, 16, 18)
-        v.setSpacing(10)
+        v.setContentsMargins(T.CARD_PAD, T.CARD_PAD, ACTION_EDGE, T.CARD_PAD)
+        v.setSpacing(GAP_M)
 
         top = QHBoxLayout()
-        top.setSpacing(12)
+        top.setSpacing(GAP_M)
         titles = QVBoxLayout()
-        titles.setSpacing(2)
+        titles.setSpacing(GAP_XS)
         titles.addWidget(ElidedLabel(meeting.label, "title"))
         minutes = meeting.duration / 60
         meta = f"{human_date(meeting.created_at)}   ·   {minutes:.0f} min   ·   {meeting.words} palabras"
@@ -681,7 +713,7 @@ class MeetingCard(QFrame):
         # En la ventana angosta los iconos no caben: se guardan aquí y no se pierde ninguna acción.
         self.more = QPushButton("···")
         self.more.setProperty("variant", "ghost")
-        self.more.setFixedSize(34, 34)
+        self.more.setFixedSize(CONTROL_H, CONTROL_H)
         self.more.setCursor(Qt.CursorShape.PointingHandCursor)
         self.more.setToolTip("Más acciones")
         menu = QMenu(self.more)
@@ -694,8 +726,8 @@ class MeetingCard(QFrame):
 
         self.body = QWidget()
         body = QVBoxLayout(self.body)
-        body.setContentsMargins(0, 8, 0, 0)
-        body.setSpacing(6)
+        body.setContentsMargins(0, GAP_L, 0, 0)
+        body.setSpacing(GAP_XS)
         if meeting.summary:
             summary = QLabel()  # texto enriquecido propio: no pasa por WrapLabel
             summary.setWordWrap(True)
@@ -704,15 +736,15 @@ class MeetingCard(QFrame):
             on_restyle(summary, lambda text=meeting.summary: summary.setText(summary_html(text)))
             summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             body.addWidget(summary)
-            body.addSpacing(10)
+            body.addSpacing(GAP_S)
         body.addWidget(label("TUS NOTAS", "eyebrow"))
         self.notes = QPlainTextEdit(meeting.notes)
         self.notes.setPlaceholderText("Lo que anotaste en la reunión. Puedes seguir escribiendo aquí.")
-        self.notes.setMinimumHeight(90)
+        self.notes.setMinimumHeight(88)
         self.notes.setMaximumHeight(200)
         self.notes.textChanged.connect(self._save_notes)
         body.addWidget(self.notes)
-        body.addSpacing(10)
+        body.addSpacing(GAP_S)
         body.addWidget(label("TRANSCRIPCIÓN", "eyebrow"))
         text = QPlainTextEdit(meeting.transcript or "Sin transcripción.")
         text.setReadOnly(True)
@@ -767,11 +799,11 @@ class MeetingsPage(QWidget):
         self.ctl = ctl
         self.cards: dict[int, MeetingCard] = {}
         root = page_body(self)
-        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN, T.PAGE_BOTTOM)
+        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN - SCROLL_GUTTER, T.PAGE_BOTTOM)
         root.setSpacing(T.SECTION_GAP)
 
         head = QHBoxLayout()
-        head.setSpacing(12)
+        head.setSpacing(GAP_L)
         head.addLayout(page_header(
             "GRABADAS EN TU PC", "Reuniones",
             "NeonWhisper detecta cuándo entras a una reunión, la graba y al terminar te deja la "
@@ -784,24 +816,24 @@ class MeetingsPage(QWidget):
         # Tarjeta de la reunión en curso.
         self.live = card(glow=True)
         live_box = QVBoxLayout(self.live)
-        live_box.setContentsMargins(T.CARD_PAD, 20, T.CARD_PAD, 20)
-        live_box.setSpacing(14)
+        live_box.setContentsMargins(T.CARD_PAD, T.CARD_PAD, T.CARD_PAD, T.CARD_PAD)
+        live_box.setSpacing(GAP_L)
         live_row = QWidget()
         live = QHBoxLayout(live_row)
         live.setContentsMargins(0, 0, 0, 0)
-        live.setSpacing(16)
+        live.setSpacing(GAP_L)
         live_box.addWidget(live_row)
         self.live_dot = StatusDot()
         self.live_dot.state = "recording"
         live.addWidget(self.live_dot, 0, Qt.AlignmentFlag.AlignVCenter)
         texts = QVBoxLayout()
-        texts.setSpacing(2)
+        texts.setSpacing(GAP_XS)
         self.live_title = ElidedLabel("Grabando reunión", "title")
         self.live_detail = ElidedLabel("", "dim")
         texts.addWidget(self.live_title)
         texts.addWidget(self.live_detail)
         live.addLayout(texts, 1)
-        self.live_bars = WaveBars(lambda: ctl.meeting_recorder.level, height=34)
+        self.live_bars = WaveBars(lambda: ctl.meeting_recorder.level, height=WAVE_H)
         live.addWidget(self.live_bars, 1)
 
         # Qué se está grabando: se puede silenciar cada fuente en caliente.
@@ -830,11 +862,11 @@ class MeetingsPage(QWidget):
 
         # Debajo: lo que se va transcribiendo y un bloc para tus notas.
         self.panel = QGridLayout()
-        self.panel.setSpacing(16)
+        self.panel.setSpacing(GAP_L)
         transcript_host = QWidget()
         transcript_box = QVBoxLayout(transcript_host)
         transcript_box.setContentsMargins(0, 0, 0, 0)
-        transcript_box.setSpacing(4)
+        transcript_box.setSpacing(GAP_XS)
         transcript_box.addWidget(label("EN VIVO", "eyebrow"))
         self.live_view = QPlainTextEdit()
         self.live_view.setReadOnly(True)
@@ -845,7 +877,7 @@ class MeetingsPage(QWidget):
         notes_host = QWidget()
         notes_box = QVBoxLayout(notes_host)
         notes_box.setContentsMargins(0, 0, 0, 0)
-        notes_box.setSpacing(4)
+        notes_box.setSpacing(GAP_XS)
         notes_box.addWidget(label("TUS NOTAS", "eyebrow"))
         self.notes_view = QPlainTextEdit()
         self.notes_view.setMinimumHeight(120)
@@ -860,7 +892,7 @@ class MeetingsPage(QWidget):
         self.live.hide()
         content = QWidget()
         stack = QVBoxLayout(content)
-        stack.setContentsMargins(0, 2, 10, 6)
+        stack.setContentsMargins(0, 0, 0, SHADOW_ROOM)
         stack.setSpacing(T.SECTION_GAP)
         stack.addWidget(self.live)
         root.addWidget(scrollable(content, limit=False), 1)
@@ -869,10 +901,10 @@ class MeetingsPage(QWidget):
         # Preguntar a tus reuniones, con el modelo local.
         self.ask_card = card()
         ask_box = QVBoxLayout(self.ask_card)
-        ask_box.setContentsMargins(T.CARD_PAD, 20, T.CARD_PAD, 20)
-        ask_box.setSpacing(10)
+        ask_box.setContentsMargins(T.CARD_PAD, T.CARD_PAD, T.CARD_PAD, T.CARD_PAD)
+        ask_box.setSpacing(GAP_M)
         ask_row = QHBoxLayout()
-        ask_row.setSpacing(10)
+        ask_row.setSpacing(GAP_M)
         self.ask_input = QLineEdit()
         self.ask_input.setPlaceholderText("Pregúntale a tus reuniones: «¿qué quedó pendiente para mí?»")
         self.ask_input.returnPressed.connect(self._ask)
@@ -1023,15 +1055,15 @@ class ModelRow(QWidget):
         name, _, desc = (SUMMARY_MODELS if summary else MODELS)[key].partition(" · ")
         self.name = name
         v = QVBoxLayout(self)
-        v.setContentsMargins(0, 12, 0, 12)
-        v.setSpacing(8)
+        v.setContentsMargins(0, GAP_M, 0, GAP_M)
+        v.setSpacing(GAP_S)
 
         top = QHBoxLayout()
-        top.setSpacing(8)
+        top.setSpacing(GAP_S)
         texts = QVBoxLayout()
-        texts.setSpacing(2)
+        texts.setSpacing(GAP_XS)
         title_row = QHBoxLayout()
-        title_row.setSpacing(8)
+        title_row.setSpacing(GAP_S)
         title = label(name, "title")
         self.badge = label("EN USO", "badge")
         title_row.addWidget(title)
@@ -1113,9 +1145,12 @@ class SettingsPage(QWidget):
         super().__init__()
         self.ctl = ctl
         s = ctl.settings
+        self._rows: list[tuple[QBoxLayout, QWidget]] = []
+        self._compact: bool | None = None
         inner = QWidget()
         root = QVBoxLayout(inner)
-        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN - 8, T.PAGE_BOTTOM + 12)
+        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN - SCROLL_GUTTER,
+                                T.PAGE_BOTTOM + SHADOW_ROOM)
         root.setSpacing(T.SECTION_GAP)
         root.addLayout(page_header("CONFIGURACIÓN", "Ajustes", "Los cambios se guardan al instante."))
 
@@ -1124,7 +1159,7 @@ class SettingsPage(QWidget):
         hot = QWidget()
         hl = QHBoxLayout(hot)
         hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(12)
+        hl.setSpacing(GAP_M)
         self.keycaps = KeyCaps(s.hotkey)
         self.capture_btn = icon_button(T.Glyph.KEYBOARD, "Cambiar atajo")
         self.capture_btn.clicked.connect(self._toggle_capture)
@@ -1181,7 +1216,7 @@ class SettingsPage(QWidget):
         mic_host = QWidget()
         mh = QHBoxLayout(mic_host)
         mh.setContentsMargins(0, 0, 0, 0)
-        mh.setSpacing(10)
+        mh.setSpacing(GAP_M)
         mh.addWidget(self.mic_combo)
         self.mic_test_btn = icon_button(T.Glyph.MIC, "Probar")
         self.mic_test_btn.clicked.connect(self._toggle_mic_test)
@@ -1192,9 +1227,9 @@ class SettingsPage(QWidget):
         self.mic_tester.changed.connect(self._on_mic_test)
         self.mic_panel = QWidget()
         mp = QHBoxLayout(self.mic_panel)
-        mp.setContentsMargins(0, 0, 0, 14)
-        mp.setSpacing(16)
-        self.mic_bars = WaveBars(lambda: self.mic_tester.level, height=40)
+        mp.setContentsMargins(0, 0, 0, GAP_M)
+        mp.setSpacing(GAP_L)
+        self.mic_bars = WaveBars(lambda: self.mic_tester.level, height=WAVE_H)
         self.mic_status = label("", "muted", wrap=True)
         self.mic_status.setMinimumWidth(280)
         mp.addWidget(self.mic_bars, 1)
@@ -1207,10 +1242,11 @@ class SettingsPage(QWidget):
         vol = QWidget()
         vl = QHBoxLayout(vol)
         vl.setContentsMargins(0, 0, 0, 0)
+        vl.setSpacing(GAP_M)
         slider = NoWheelSlider(Qt.Orientation.Horizontal)
         slider.setRange(0, 100)
         slider.setValue(int(s.sound_volume * 100))
-        slider.setFixedWidth(200)
+        slider.setFixedWidth(SLIDER_W)
         slider.sliderReleased.connect(lambda: ctl.update_setting("sound_volume", slider.value() / 100))
         test = icon_button(T.Glyph.PLAY, "Probar")
         test.clicked.connect(ctl.test_sound)
@@ -1225,7 +1261,7 @@ class SettingsPage(QWidget):
             "micrófono. Cuando eso pasa, graba tu voz y lo que suena en tu PC, y al terminar transcribe y "
             "resume, todo en tu computadora. Avisa a los demás de que estás grabando: en muchos sitios es "
             "obligatorio.", "muted", wrap=True))
-        sec.addSpacing(10)
+        sec.addSpacing(GAP_S)
         self._row(sec, "Grabar reuniones", "Con esto apagado, NeonWhisper no vigila nada ni graba.",
                   self._toggle(s.meetings_enabled, lambda v: ctl.update_setting("meetings_enabled", v)))
         self._row(sec, "Empezar sin preguntar", "Si lo apagas, solo te avisa y tú le das a Grabar.",
@@ -1255,9 +1291,9 @@ class SettingsPage(QWidget):
         audio_host = QWidget()
         ah = QHBoxLayout(audio_host)
         ah.setContentsMargins(0, 0, 0, 0)
-        ah.setSpacing(10)
-        self.meeting_bars = WaveBars(lambda: self.meeting_audio.level, height=34)
-        self.meeting_bars.setFixedWidth(150)
+        ah.setSpacing(GAP_M)
+        self.meeting_bars = WaveBars(lambda: self.meeting_audio.level, height=WAVE_H)
+        self.meeting_bars.setFixedWidth(160)
         self.meeting_test_btn = icon_button(T.Glyph.PLAY, "Probar")
         self.meeting_test_btn.clicked.connect(self._toggle_meeting_audio_test)
         ah.addWidget(self.meeting_bars)
@@ -1294,9 +1330,9 @@ class SettingsPage(QWidget):
         sec = self._section(root, T.Glyph.THEME, "Apariencia")
         sec.addWidget(label("El tema pinta toda la app: fondos, acentos, el orbe del micrófono y el ícono. "
                             "El cambio es inmediato, no hace falta reiniciar.", "muted", wrap=True))
-        sec.addSpacing(10)
+        sec.addSpacing(GAP_S)
         theme_host = QWidget()
-        theme_cards = CardFlow(186, 12, theme_host)
+        theme_cards = CardFlow(186, T.CARD_GAP, theme_host)
         self.theme_group = QButtonGroup(self)
         self.theme_cards: dict[str, ThemeCard] = {}
         for key in T.THEMES:
@@ -1307,7 +1343,7 @@ class SettingsPage(QWidget):
             self.theme_cards[key] = c
             theme_cards.addWidget(c)
         sec.addWidget(theme_host)
-        sec.addSpacing(14)
+        sec.addSpacing(GAP_L)
         sec.addWidget(separator())
         self._row(sec, "Barra flotante a juego",
                   "Al cambiar de tema, la barra flotante se pone el diseño del mismo nombre. "
@@ -1321,14 +1357,14 @@ class SettingsPage(QWidget):
                   self._toggle(s.show_overlay, lambda v: ctl.update_setting("show_overlay", v)))
         design = QWidget()
         dv = QVBoxLayout(design)
-        dv.setContentsMargins(0, 12, 0, 14)
-        dv.setSpacing(4)
+        dv.setContentsMargins(0, GAP_M, 0, GAP_M)
+        dv.setSpacing(GAP_XS)
         dv.addWidget(label("Diseño", "title"))
         dv.addWidget(label("Al cambiar cualquier opción, la barra aparece unos segundos para que veas cómo queda.",
                            "muted", wrap=True))
-        dv.addSpacing(8)
+        dv.addSpacing(GAP_S)
         cards_host = QWidget()
-        cards = CardFlow(186, 12, cards_host)
+        cards = CardFlow(186, T.CARD_GAP, cards_host)
         self.style_group = QButtonGroup(self)
         self.style_cards: dict[str, OverlayStyleCard] = {}
         for key in STYLES:
@@ -1355,7 +1391,7 @@ class SettingsPage(QWidget):
         actions = QWidget()
         al = QHBoxLayout(actions)
         al.setContentsMargins(0, 0, 0, 0)
-        al.setSpacing(10)
+        al.setSpacing(GAP_M)
         preview = icon_button(T.Glyph.PLAY, "Vista previa")
         preview.clicked.connect(ctl.preview_overlay)
         reset = icon_button(T.Glyph.RETRY, "Restablecer", "ghost", "Volver al diseño Neón original")
@@ -1380,6 +1416,7 @@ class SettingsPage(QWidget):
         folders = QWidget()
         fl = QHBoxLayout(folders)
         fl.setContentsMargins(0, 0, 0, 0)
+        fl.setSpacing(GAP_M)
         open_data = icon_button(T.Glyph.FOLDER, "Historial y ajustes")
         open_data.clicked.connect(lambda: os.startfile(DATA_DIR))
         open_models = icon_button(T.Glyph.FOLDER, "Modelos")
@@ -1398,29 +1435,28 @@ class SettingsPage(QWidget):
     def _section(root: QVBoxLayout, glyph: str, title: str) -> QVBoxLayout:
         frame = card()
         v = QVBoxLayout(frame)
-        v.setContentsMargins(T.CARD_PAD, 20, T.CARD_PAD, 12)
+        v.setContentsMargins(T.CARD_PAD, T.CARD_PAD, T.CARD_PAD, GAP_M)
         v.setSpacing(0)
         head = QHBoxLayout()
-        head.setSpacing(12)
+        head.setSpacing(GAP_M)
         head.addWidget(GlyphLabel(glyph, "CYAN", 18))
         head.addWidget(label(title, "h2"))
         head.addStretch(1)
         v.addLayout(head)
-        v.addSpacing(6)
+        v.addSpacing(GAP_S)
         root.addWidget(frame)
         return v
 
-    @staticmethod
-    def _row(section: QVBoxLayout, title: str, desc: str, control: QWidget, last: bool = False) -> None:
+    def _row(self, section: QVBoxLayout, title: str, desc: str, control: QWidget, last: bool = False) -> None:
         row = QWidget()
         h = QHBoxLayout(row)
-        h.setContentsMargins(0, 14, 0, 14)
-        h.setSpacing(26)
+        h.setContentsMargins(0, GAP_M, 0, GAP_M)
+        h.setSpacing(GAP_XL)
         text_host = QWidget()
         text_host.setMaximumWidth(520)  # a 1920 px el rótulo quedaba a un metro de su control
         text = QVBoxLayout(text_host)
         text.setContentsMargins(0, 0, 0, 0)
-        text.setSpacing(4)
+        text.setSpacing(GAP_XS)
         text.addWidget(label(title, "title"))
         if desc:
             text.addWidget(label(desc, "muted", wrap=True))
@@ -1428,21 +1464,38 @@ class SettingsPage(QWidget):
         h.addStretch(0)
         h.addWidget(control, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         section.addWidget(row)
+        self._rows.append((h, control))
         if not last:
             section.addWidget(separator())
+
+    # --- ventana angosta -----------------------------------------------------
+    def set_compact(self, compact: bool) -> None:
+        """Con poco ancho el control baja debajo de su rótulo en vez de estrujarlo en una columna."""
+        if compact == self._compact:
+            return
+        self._compact = compact
+        for h, control in self._rows:
+            h.setDirection(QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight)
+            h.setSpacing(GAP_S if compact else GAP_XL)
+            h.setAlignment(control, (Qt.AlignmentFlag.AlignLeft if compact else Qt.AlignmentFlag.AlignRight)
+                           | Qt.AlignmentFlag.AlignVCenter)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.set_compact(self.width() < COMPACT_WIDTH)
 
     # --- barra flotante -------------------------------------------------------
     def _percent_slider(self, value: float, lo: int, hi: int, key: str) -> QWidget:
         host = QWidget()
         h = QHBoxLayout(host)
         h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(12)
+        h.setSpacing(GAP_M)
         slider = NoWheelSlider(Qt.Orientation.Horizontal)
         slider.setRange(lo, hi)
         slider.setPageStep(10)
-        slider.setFixedWidth(220)
+        slider.setFixedWidth(SLIDER_W)
         pct = label("", "pct")
-        pct.setFixedWidth(46)
+        pct.setFixedWidth(48)
         pct.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         def changed(v: int) -> None:
@@ -1633,10 +1686,10 @@ class MainWindow(QMainWindow):
         sidebar.setObjectName("Sidebar")
         sidebar.setFixedWidth(224)
         sv = QVBoxLayout(sidebar)
-        sv.setContentsMargins(14, 24, 14, 16)
-        sv.setSpacing(8)
+        sv.setContentsMargins(GAP_M, GAP_XL, GAP_M, GAP_L)
+        sv.setSpacing(GAP_S)
         brand = QHBoxLayout()
-        brand.setSpacing(12)
+        brand.setSpacing(GAP_M)
         self.logo = Logo(40)
         brand.addWidget(self.logo)
         name = QLabel()
@@ -1647,7 +1700,7 @@ class MainWindow(QMainWindow):
         brand.addWidget(name)
         brand.addStretch(1)
         sv.addLayout(brand)
-        sv.addSpacing(26)
+        sv.addSpacing(GAP_XL)
 
         self.stack = QStackedWidget()
         self.home = HomePage(ctl)
@@ -1679,19 +1732,19 @@ class MainWindow(QMainWindow):
 
         status = card()
         st = QHBoxLayout(status)
-        st.setContentsMargins(16, 14, 16, 14)
-        st.setSpacing(10)
+        st.setContentsMargins(GAP_L, GAP_L, GAP_L, GAP_L)
+        st.setSpacing(GAP_M)
         self.dot = StatusDot()
         st.addWidget(self.dot, 0, Qt.AlignmentFlag.AlignTop)
         texts = QVBoxLayout()
-        texts.setSpacing(1)
+        texts.setSpacing(GAP_XS)
         self.model_title = label("Preparando…", "title")
         self.model_detail = label("", "dim", wrap=True)
         texts.addWidget(self.model_title)
         texts.addWidget(self.model_detail)
         self.dl_label = label("", "muted", wrap=True)
         self.dl_bar = NeonProgress(6)
-        texts.addSpacing(6)
+        texts.addSpacing(GAP_S)
         texts.addWidget(self.dl_label)
         texts.addWidget(self.dl_bar)
         self.dl_label.hide()
