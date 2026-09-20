@@ -747,6 +747,7 @@ class ToggleSwitch(QAbstractButton):
         self.setCheckable(True)
         self.setChecked(checked)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)  # sin esto no llega el aviso de hover
         self._pos = 1.0 if checked else 0.0
         self._anim = QVariantAnimation(self, duration=160, easingCurve=QEasingCurve.Type.OutCubic)
         self._anim.valueChanged.connect(self._set_pos)
@@ -771,11 +772,13 @@ class ToggleSwitch(QAbstractButton):
         r = QRectF(1, 1, self.width() - 2, self.height() - 2)
         track = QPainterPath()
         track.addRoundedRect(r, r.height() / 2, r.height() / 2)
-        off = QColor(T.BG3)
+        # Al pasar el raton, el borde se enciende: es el unico aviso de que se puede pulsar.
+        hover = self.underMouse()
+        off = QColor(T.THEME.hover_bg if hover else T.BG3)
         grad = QLinearGradient(r.topLeft(), r.topRight())
         grad.setColorAt(0, QColor(T.BLUE))
         grad.setColorAt(1, QColor(T.CYAN))
-        p.setPen(QPen(QColor(T.LINE_HI), 1))
+        p.setPen(QPen(QColor(T.CYAN if hover else T.LINE_HI), 1))
         p.setBrush(off)
         p.drawPath(track)
         if self._pos > 0:
@@ -857,7 +860,7 @@ class OverlayStyleCard(QAbstractButton):
         look, s = self.look, self.settings
         checked, hover = self.isChecked(), self.underMouse()
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        p.setPen(QPen(QColor(T.CYAN if checked else T.LINE_HI if hover else T.LINE), 1.6 if checked else 1))
+        p.setPen(QPen(QColor(T.CYAN if checked else T.LINE_HI if hover else T.LINE), 2 if checked else 1))
         p.setBrush(QColor(T.BG3 if checked or hover else T.BG0))
         p.drawRoundedRect(r, 12, 12)
 
@@ -950,7 +953,7 @@ class ThemeCard(QAbstractButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         u, checked, hover = self.theme, self.isChecked(), self.underMouse()
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        p.setPen(QPen(QColor(T.CYAN if checked else T.LINE_HI if hover else T.LINE), 1.6 if checked else 1))
+        p.setPen(QPen(QColor(T.CYAN if checked else T.LINE_HI if hover else T.LINE), 2 if checked else 1))
         p.setBrush(QColor(T.BG3 if checked or hover else T.BG0))
         p.drawRoundedRect(r, 12, 12)
 

@@ -364,6 +364,10 @@ QPushButton[variant="primary"] {{
 QPushButton[variant="primary"]:hover {{
     background: {t.primary_hover_from}; border-color: {t.primary_hover_from}; color: {t.on_accent};
 }}
+/* Apagado, un botón primario tiene que dejar de parecer picable: sin relleno y con la tinta floja. */
+QPushButton[variant="primary"]:disabled, QPushButton[variant="hero"]:disabled {{
+    background: {t.bg3}; border-color: {t.line}; color: {t.dim};
+}}
 QPushButton[variant="hero"] {{
     background: {t.primary_from}; border: 1px solid {t.primary_from}; color: {t.on_accent};
     font-family: {FONT_DISPLAY}; font-size: 13pt; font-weight: 600; padding: 14px 22px;
@@ -378,6 +382,7 @@ QPushButton[variant="hero2"] {{
 QPushButton[variant="hero2"]:hover {{ background: {t.hover_bg}; border-color: {t.accent}; color: {t.ice}; }}
 QPushButton[variant="ghost"] {{ background: transparent; border: 1px solid transparent; color: {t.muted}; padding: 6px 12px; }}
 QPushButton[variant="ghost"]:hover {{ color: {t.ice}; background: {t.bg3}; border-color: {t.line_hi}; }}
+QPushButton[variant="ghost"]:pressed {{ color: {t.ice}; background: {t.press_bg}; border-color: {t.line_hi}; }}
 QPushButton[variant="danger"]:hover {{ border-color: {t.danger}; color: {t.danger}; }}
 QPushButton::menu-indicator {{ image: none; width: 0; }}
 
@@ -386,12 +391,16 @@ QPushButton#NavButton {{
     color: {t.muted}; background: transparent; border: 1px solid transparent;
 }}
 QPushButton#NavButton:hover {{ background: {t.bg3}; color: {t.nav_hover}; }}
+QPushButton#NavButton:pressed {{ background: {t.press_bg}; color: {t.nav_hover}; }}
 QPushButton#NavButton:checked {{
     color: {t.ice}; border: 2px solid {checked_edge}; background: {checked_bg}; padding: 11px 15px;
 }}
 
 QPushButton#Segment {{ border-radius: 0; padding: 8px 18px; color: {t.muted}; background: {t.bg3}; font-weight: 600; }}
+QPushButton#Segment:hover {{ color: {t.nav_hover}; background: {t.hover_bg}; }}
+QPushButton#Segment:pressed {{ background: {t.press_bg}; }}
 QPushButton#Segment:checked {{ color: {t.on_accent}; background: {t.accent}; border-color: {t.accent}; }}
+QPushButton#Segment:checked:hover {{ color: {t.on_accent}; background: {t.primary_hover_from}; }}
 QPushButton#Segment[pos="first"] {{ border-top-left-radius: {R_CTRL}px; border-bottom-left-radius: {R_CTRL}px; }}
 QPushButton#Segment[pos="last"] {{ border-top-right-radius: {R_CTRL}px; border-bottom-right-radius: {R_CTRL}px; }}
 
@@ -420,6 +429,9 @@ QCheckBox::indicator {{
 }}
 QCheckBox::indicator:hover {{ border-color: {t.accent}; }}
 QCheckBox::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; }}
+QCheckBox:disabled {{ color: {t.dim}; }}
+QCheckBox::indicator:disabled {{ background: {t.bg3}; border-color: {t.line}; }}
+QCheckBox::indicator:checked:disabled {{ background: {t.dim}; border-color: {t.dim}; }}
 
 QSlider::groove:horizontal {{ height: 6px; background: {t.line_hi}; border-radius: 3px; }}
 QSlider::sub-page:horizontal {{ background: {t.accent}; border-radius: 3px; }}
