@@ -19,10 +19,11 @@
 - **Dos modos**: *Iniciar / detener* (presionas una vez para hablar y otra para pegar) o *Mantener presionado* (walkie-talkie).
 - **Pega automáticamente** donde está tu cursor y después restaura lo que tenías en el portapapeles.
 - **Barra flotante neón** con las ondas de tu voz en tiempo real, cronómetro y botón para cancelar (`Esc` también cancela).
-- **3 temas de interfaz** (Ajustes → Apariencia): *Neón* (negro con brillo azul), *Cristal* (vidrio azul, claro y luminoso) y *Sutil* (negro con tonos blancos, sin color). Pintan toda la app —fondos, acentos, el orbe del micrófono y el ícono— y el cambio es inmediato, sin reiniciar.
-- **Barra flotante a tu gusto** (Ajustes → Barra flotante): los mismos 3 diseños, tamaño, transparencia del fondo y opacidad, con vista previa en pantalla. Por defecto se pone a juego con el tema; puedes combinarlos como quieras.
+- **4 temas de interfaz** (Ajustes → Apariencia): *Neón* (negro con brillo azul), *Cristal* (vidrio azul, claro y luminoso), *Sutil* (negro con tonos blancos, sin color) y *Pastel* (crema con lavanda, menta y durazno, el único claro). Pintan toda la app —fondos, acentos, el orbe del micrófono y el ícono— y el cambio es inmediato, sin reiniciar.
+- **Barra flotante a tu gusto** (Ajustes → Barra flotante): los mismos 4 diseños, tamaño, transparencia del fondo y opacidad, con vista previa en pantalla. Por defecto se pone a juego con el tema; puedes combinarlos como quieras.
 - **Sonidos** al empezar y terminar de grabar, con volumen ajustable.
 - **Historial** con búsqueda, copiar, borrar y exportar a `.txt`.
+- **Limpiar reuniones a granel**: en la pestaña Reuniones, **Seleccionar** deja elegir varias con casillas (o *Todas*) y borrarlas de un golpe, junto con su audio. La que se está grabando no se puede borrar.
 - **Whisper large-v3-turbo** con [faster-whisper](https://github.com/SYSTRAN/faster-whisper): en una GPU NVIDIA transcribe ~9 s de audio en ~0.4 s. Si no hay GPU, usa el CPU automáticamente.
 - **Vocabulario personalizado** para que escriba bien nombres propios y términos técnicos.
 - **Prueba de micrófono**: graba 4 segundos, mide el nivel y te reproduce lo que grabó.
@@ -32,6 +33,7 @@
 - **Transcripción en vivo y tus notas**: ve lo que se va diciendo mientras la reunión ocurre y apunta lo tuyo al lado; tus notas entran en el resumen final.
 - **Plantillas de resumen**: acta, 1:1, entrevista, llamada de ventas o daily.
 - **Pregúntale a tus reuniones**: «¿qué quedó pendiente para mí?» — responde el modelo local con lo que digan tus transcripciones, citando de qué reunión sale cada dato.
+- **Se actualiza sola**: *Ajustes → Actualizaciones* compara tu versión con la publicada en este repositorio y la instala con un botón. Tus ajustes, tu historial y tus modelos no se tocan.
 - **Programa de verdad**: se instala en Archivos de programa, corre como `NeonWhisper.exe` y aparece en *Aplicaciones instaladas* de Windows, con su botón de desinstalar.
 - **Privado**: tu voz nunca sale de tu computadora.
 
@@ -41,7 +43,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/overlay_designs.png" width="820" alt="Diseños de la barra flotante: Neón, Cristal y Sutil">
+  <img src="docs/overlay_designs.png" width="820" alt="Diseños de la barra flotante: Neón, Cristal, Sutil y Pastel">
+</p>
+
+<p align="center">
+  <img src="docs/themes.png" width="820" alt="Los cuatro temas: Neón, Cristal, Sutil y Pastel">
 </p>
 
 ## Instalación (Windows 10/11)
@@ -66,15 +72,19 @@ Si vienes de una versión anterior, el instalador **mueve tus modelos** a la car
 
 ## Actualizar
 
-Doble clic en **`Actualizar.bat`** (está en la carpeta del programa). Compara versiones, reemplaza los archivos, revisa dependencias y vuelve a abrir la app. Tus **ajustes**, tu **historial** y tus **modelos** quedan intactos.
+**Desde la app**: *Ajustes → Actualizaciones → Buscar actualizaciones*. Compara tu versión con la publicada aquí y, si hay una más nueva, la instala con un botón. La app se cierra sola mientras se instala y vuelve a abrirse al terminar; te avisa antes de empezar.
 
-Si el repositorio es privado, primero baja el ZIP (botón verde **Code → Download ZIP**) y déjalo en Descargas: `Actualizar.bat` lo encuentra solo. También puedes pasarle la ruta:
+**A mano**: doble clic en **`Actualizar.bat`**, en la carpeta del programa. Hace exactamente lo mismo desde una consola.
+
+En los dos casos tus **ajustes**, tu **historial** y tus **modelos** quedan intactos.
+
+Sin internet, baja el ZIP (botón verde **Code → Download ZIP**) y déjalo en Descargas: `Actualizar.bat` lo encuentra solo. También puedes pasarle la ruta:
 
 ```
 Actualizar.bat -Zip "C:\Users\tu-usuario\Downloads\NeonWhisper-main.zip"
 ```
 
-Si tu carpeta es un clon de git, actualízala con `git pull` y `uv sync` en vez de `Actualizar.bat`.
+Si tu carpeta es un clon de git, actualízala con `git pull` y `uv sync`: la app lo detecta y te lo dice en vez de pisarte el repositorio.
 
 ## Desinstalar
 
@@ -90,6 +100,7 @@ Quita el programa, sus accesos directos, el inicio con Windows y su registro. An
 | Cancelar | `Esc` o la ✕ de la barra flotante |
 | Cambiar atajo | Ajustes → Atajo de teclado → **Cambiar atajo** y presiona tu combinación |
 | Ver historial | Pestaña **Historial** (buscar, copiar, borrar, exportar) |
+| Borrar varias reuniones | Pestaña **Reuniones** → **Seleccionar** → marca las que quieras → **Borrar** |
 | Grabar una reunión a mano | Pestaña **Reuniones** → **Grabar ahora**, o clic derecho en la bandeja |
 | Salir | Clic derecho en el ícono de la bandeja → **Salir** |
 
@@ -98,6 +109,10 @@ Si dictas con la ventana de NeonWhisper enfocada (por ejemplo, haciendo clic en 
 <p align="center">
   <img src="docs/settings.png" width="410" alt="Ajustes">
   <img src="docs/history.png" width="410" alt="Historial">
+</p>
+
+<p align="center">
+  <img src="docs/meetings.png" width="820" alt="Pestaña de Reuniones">
 </p>
 
 ## Reuniones
