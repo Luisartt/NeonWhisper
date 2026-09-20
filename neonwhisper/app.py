@@ -717,11 +717,21 @@ class Controller(QObject):
         )
 
     def delete_meeting(self, meeting_id: int) -> None:
-        meeting = self.meetings.get(meeting_id)
-        if meeting and meeting.audio_path:
-            Path(meeting.audio_path).unlink(missing_ok=True)
-        self.meetings.delete(meeting_id)
+        self.delete_meetings([meeting_id])
+
+    def delete_meetings(self, ids) -> None:
+        """Borra varias reuniones y el audio que dejan atrás."""
+        # La reunión en curso no se borra ni por descuido: sus archivos están abiertos.
+        ids = [i for i in ids if i != self.meeting_id]
+        if not ids:
+            return
+        for path in self.meetings.delete_many(ids):
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError as exc:  # un .wav bloqueado no debe dejar la lista a medias
+                log.warning("No se pudo borrar %s: %s", path, exc)
         self.window.meetings.refresh()
+        self.window.home.refresh()  # los números de arriba cambian
 
     def retry_meeting(self, meeting_id: int) -> None:
         """Vuelve a intentar: resumir si ya hay transcripción, o transcribir si queda el audio."""
