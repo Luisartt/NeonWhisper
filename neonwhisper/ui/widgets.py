@@ -155,15 +155,45 @@ class WrapLabel(QLabel):
     def setText(self, text: str) -> None:
         self._plain = text
         super().setText(f"<div style='line-height:140%'>{html.escape(text)}</div>")
+        self._fit()
 
     def text(self) -> str:
         return self._plain
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit()
+
+    def _fit(self) -> None:
+        """Reserva el alto que el texto necesita al ancho que le tocó.
+
+        Con texto enriquecido, `sizeHint` se calcula al ancho «ideal» del documento (una línea
+        larga), y ese alto no es el que hace falta cuando el párrafo se reparte en varias líneas.
+        Un área de scroll reparte alturas a partir de ese sizeHint, así que el último renglón se
+        quedaba cortado por la mitad. Fijando el mínimo a lo que de verdad ocupa, el reparto no
+        puede dejarlo corto.
+        """
+        width = self.width()
+        if width <= 0:
+            return
+        needed = self.heightForWidth(width)
+        # Solo si cambia: asignarlo en cada `resizeEvent` dispararía otro reparto, y otro.
+        if needed > 0 and needed != self.minimumHeight():
+            self.setMinimumHeight(needed)
 
 
 def label(text: str = "", role: str | None = None, wrap: bool = False) -> QLabel:
     lbl = WrapLabel(text) if wrap else QLabel(text)
     if role:
         lbl.setProperty("role", role)
+    if wrap:
+        # Qt no sabe por su cuenta que el alto de un párrafo depende del ancho que le toque: sin
+        # esto el reparto le da el alto de menos renglones de los que necesita y el último sale
+        # cortado por la mitad. Se nota al estrechar los párrafos, porque pasan a ocupar más
+        # renglones, y con el interlineado al 140 % de `WrapLabel`, que pide todavía más alto.
+        policy = lbl.sizePolicy()
+        policy.setHeightForWidth(True)
+        lbl.setSizePolicy(policy)
     return lbl
 
 
