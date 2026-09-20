@@ -113,6 +113,11 @@ class Source:
                 self.last_block = time.monotonic()
                 return
             except Exception:  # noqa: BLE001 - el dispositivo no acepta 16 kHz: se usa el suyo
+                if self._stream is not None:  # PortAudio no lo cierra solo
+                    try:
+                        self._stream.close(ignore_errors=True)
+                    except Exception:  # noqa: BLE001
+                        pass
                 self._stream = None
         raise RuntimeError(f"No se pudo abrir el dispositivo {self.device}")
 
@@ -191,8 +196,12 @@ class MeetingRecorder:
 
     @property
     def sources(self) -> dict[str, bool]:
-        """Qué fuentes hay y cuáles están grabando ahora mismo."""
-        return {kind: (self._source(kind) is not None and not self.is_muted(kind)) for kind in ("mic", "system")}
+        """Qué fuentes hay, siguen vivas y no están silenciadas."""
+        return {kind: self._is_recording(kind) for kind in ("mic", "system")}
+
+    def _is_recording(self, kind: str) -> bool:
+        source = self._source(kind)
+        return source is not None and getattr(source, "alive", True) and not source.muted
 
     def describe_short(self) -> str:
         """Versión corta para el aviso flotante: «micro + sistema»."""
@@ -233,11 +242,18 @@ class MeetingRecorder:
                 self.system_audio = True
                 self.system_label = getattr(loopback, "label", "")
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handle = wave.open(str(path), "wb")
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(SAMPLE_RATE)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = wave.open(str(path), "wb")
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(SAMPLE_RATE)
+        except Exception:  # noqa: BLE001 - sin esto el micrófono seguiría grabando sin que nadie lo pare
+            log.exception("No se pudo crear el archivo de la reunión")
+            for source in sources:
+                source.stop()
+            self.system_audio, self.system_label = False, ""
+            raise
         self._sources, self._wave, self.path = sources, handle, path
         self._stop.clear()
         self.started_at = time.monotonic()
@@ -270,6 +286,9 @@ class MeetingRecorder:
         alive = [s for s in sources if final or now - s.last_block < STARVE_SECONDS]
         if not alive:
             alive = sources
+        for source in sources:
+            if source not in alive:
+                source.take(source.available())  # su audio viejo iría desfasado para siempre
         count = min(s.available() for s in alive) if not final else max(s.available() for s in alive)
         if count <= 0:
             return
@@ -289,11 +308,15 @@ class MeetingRecorder:
         if not self.recording:
             return None, 0.0
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=3)
+        writer, self._thread = self._thread, None
+        if writer is not None:
+            writer.join(timeout=3)
         for source in self._sources:
             source.stop()
-        self._flush(final=True)
+        if writer is not None and writer.is_alive():  # disco lento: mejor perder el último tramo
+            log.warning("El hilo que escribe el audio no terminó a tiempo: no se vuelca el final")
+        else:
+            self._flush(final=True)
         handle, self._wave = self._wave, None
         seconds = 0.0
         if handle is not None:

@@ -99,6 +99,20 @@ class MeetingStore:
             rows = self._db.execute(sql, args + (limit,)).fetchall()
         return [Meeting(*r) for r in rows]
 
+    def list_brief(self, query: str = "", limit: int = 200) -> list[Meeting]:
+        """Como `list()`, pero sin arrastrar transcripciones enteras: para pintar listas."""
+        columns = ("id, created_at, app, title, duration, audio_path, "
+                   "substr(transcript, 1, 400), substr(summary, 1, 400), state, error, substr(notes, 1, 200)")
+        sql = f"SELECT {columns} FROM meetings"
+        args: tuple = ()
+        if query:
+            sql += " WHERE transcript LIKE ? OR summary LIKE ? OR title LIKE ? OR app LIKE ? OR notes LIKE ?"
+            args = tuple([f"%{query}%"] * 5)
+        sql += " ORDER BY id DESC LIMIT ?"
+        with self._lock:
+            rows = self._db.execute(sql, args + (limit,)).fetchall()
+        return [Meeting(*r) for r in rows]
+
     def unfinished(self) -> list[Meeting]:
         """Reuniones que quedaron a medias (p. ej. si se cortó la luz)."""
         with self._lock:

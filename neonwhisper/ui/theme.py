@@ -162,8 +162,8 @@ def rgba(hex_color: str, alpha: float) -> str:
 # --- Medidas y tipografías del diseño -----------------------------------------
 # El aire, el redondeo y los tamaños viven aquí: cambiar un número repinta toda la app.
 FONT_UI = '"Segoe UI Variable Text", "Segoe UI"'
-FONT_DISPLAY = '"Century Gothic", "Trebuchet MS", "Segoe UI Variable Display"'
-DISPLAY_FAMILIES = ["Century Gothic", "Trebuchet MS", "Segoe UI Variable Display", "Segoe UI"]
+FONT_DISPLAY = '"Segoe UI Variable Display", "Trebuchet MS", "Segoe UI"'
+DISPLAY_FAMILIES = ["Segoe UI Variable Display", "Trebuchet MS", "Segoe UI"]
 
 R_CARD = 20   # esquinas de las tarjetas
 R_CTRL = 14   # botones, campos y listas
@@ -235,30 +235,38 @@ def build_stylesheet() -> str:
     g = t.glow
     return f"""
 * {{ outline: none; }}
-QWidget {{ color: {t.text}; font-family: {FONT_UI}; font-size: 10.5pt; }}
+QWidget {{ color: {t.text}; font-family: {FONT_UI}; font-size: 11pt; }}
 QMainWindow, #Root {{ background: {t.bg0}; }}
 #Sidebar {{ background: {t.bg1}; border-right: 1px solid {t.line}; }}
 #Page, QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
 #Sep {{ background: {t.line}; }}
 
 QLabel {{ background: transparent; }}
-QLabel[role="h1"] {{ font-family: {FONT_DISPLAY}; font-size: 30pt; font-weight: 700; color: {t.text}; }}
-QLabel[role="h2"] {{ font-family: {FONT_DISPLAY}; font-size: 15pt; font-weight: 700; color: {t.text}; }}
-QLabel[role="eyebrow"] {{ font-size: 9pt; font-weight: 700; color: {t.accent}; letter-spacing: 1.8px; padding-top: 3px; }}
-QLabel[role="mini"] {{ font-size: 8.5pt; font-weight: 700; color: {t.accent}; letter-spacing: 1.2px; padding-top: 3px; }}
-QLabel[role="muted"] {{ color: {t.muted}; }}
+QLabel[role="h1"] {{ font-family: {FONT_DISPLAY}; font-size: 28pt; font-weight: 600; color: {t.text}; }}
+QLabel[role="h2"] {{ font-family: {FONT_DISPLAY}; font-size: 15pt; font-weight: 600; color: {t.text}; }}
+QLabel[role="eyebrow"] {{
+    font-family: {FONT_DISPLAY}; font-size: 8.5pt; font-weight: 600; color: {t.accent};
+    letter-spacing: 1.6px; padding-top: 3px;
+}}
+QLabel[role="mini"] {{
+    font-family: {FONT_DISPLAY}; font-size: 8.5pt; font-weight: 600; color: {t.accent};
+    letter-spacing: 1.2px; padding-top: 3px;
+}}
+QLabel[role="muted"] {{ color: {t.muted}; font-size: 9.5pt; }}
 QLabel[role="dim"] {{ color: {t.dim}; font-size: 9.5pt; }}
-QLabel[role="stat"] {{ font-family: {FONT_DISPLAY}; font-size: 27pt; font-weight: 700; color: {t.ice}; }}
+QLabel[role="stat"] {{ font-family: {FONT_DISPLAY}; font-size: 22pt; font-weight: 600; color: {t.ice}; }}
 QLabel[role="icon"] {{ color: {t.accent}; }}
 QLabel[role="title"] {{ font-size: 12pt; font-weight: 600; color: {t.text}; }}
-QLabel[role="strong"] {{ font-weight: 600; color: {t.text}; }}
-QLabel[role="body"] {{ color: {t.text}; font-size: 11.5pt; }}
+QLabel[role="strong"] {{ font-size: 12pt; font-weight: 600; color: {t.text}; }}
+QLabel[role="body"] {{ color: {t.text}; font-size: 11pt; }}
 QLabel[role="entry"] {{ color: {t.text}; font-size: 11pt; }}
-QLabel[role="status"] {{ color: {t.ice}; }}
-QLabel[role="pct"] {{ font-family: {FONT_DISPLAY}; font-size: 11pt; font-weight: 700; color: {t.ice}; }}
+/* El orbe: la hoja de estilos manda sobre setFont(), así que el tamaño va aquí. */
+QLabel[role="status"] {{ font-family: {FONT_DISPLAY}; font-size: 15pt; font-weight: 600; color: {t.ice}; }}
+QLabel#Brand {{ font-family: {FONT_DISPLAY}; font-size: 15pt; font-weight: 600; }}
+QLabel[role="pct"] {{ font-size: 12pt; font-weight: 600; color: {t.ice}; }}
 QLabel[role="badge"] {{
     color: {t.on_accent}; background: {t.accent}; border-radius: {R_CHIP}px; padding: 2px 10px;
-    font-size: 8.5pt; font-weight: 700;
+    font-family: {FONT_DISPLAY}; font-size: 8.5pt; font-weight: 600;
 }}
 QLabel[role="chip"] {{
     color: {t.muted}; background: {t.bg3}; border: 1px solid {t.line}; border-radius: {R_CHIP}px;
@@ -268,8 +276,8 @@ QLabel[role="chip"][tone="ok"] {{ color: {t.ok}; border-color: {rgba(t.ok, 0.45)
 QLabel[role="chip"][tone="danger"] {{ color: {t.danger}; border-color: {rgba(t.danger, 0.45)}; background: {rgba(t.danger, 0.12)}; }}
 QLabel[role="chip"][tone="accent"] {{ color: {t.ice}; border-color: {rgba(t.accent, 0.45)}; background: {rgba(t.accent, 0.12)}; }}
 QLabel[role="detail"] {{ font-size: 9.5pt; color: {t.muted}; }}
-QLabel[role="micstatus"] {{ font-size: 10pt; color: {t.muted}; }}
-QLabel[role="dlstatus"] {{ font-size: 9pt; color: {t.muted}; }}
+QLabel[role="micstatus"] {{ font-size: 9.5pt; color: {t.muted}; }}
+QLabel[role="dlstatus"] {{ font-size: 9.5pt; color: {t.muted}; }}
 QLabel[tone="ok"] {{ color: {t.ok}; }}
 QLabel[tone="danger"] {{ color: {t.danger}; }}
 QLabel[tone="accent"] {{ color: {t.ice}; }}
@@ -277,7 +285,7 @@ QLabel[tone="muted"] {{ color: {t.muted}; }}
 QLabel#KeyCap {{
     background: {t.keycap_bg}; color: {t.ice}; border: 1px solid {rgba(t.accent, 0.45)};
     border-bottom: 3px solid {t.keycap_edge}; border-radius: {R_CHIP}px; padding: 4px 13px;
-    font-family: {FONT_DISPLAY}; font-size: 11.5pt; font-weight: 700;
+    font-family: {FONT_DISPLAY}; font-size: 11pt; font-weight: 600;
 }}
 QLabel#KeyPlus {{ color: {t.dim}; font-size: 11pt; }}
 
@@ -323,7 +331,7 @@ QPushButton[variant="ghost"]:hover {{ color: {t.ice}; background: {t.bg3}; borde
 QPushButton[variant="danger"]:hover {{ border-color: {t.danger}; color: {t.danger}; }}
 
 QPushButton#NavButton {{
-    text-align: left; padding: 13px 16px; border-radius: {R_CTRL}px; font-size: 11pt; font-weight: 600;
+    text-align: left; padding: 12px 16px; border-radius: {R_CTRL}px; font-size: 11pt; font-weight: 600;
     color: {t.muted}; background: transparent; border: 1px solid transparent;
 }}
 QPushButton#NavButton:hover {{ background: {t.bg3}; color: {t.nav_hover}; }}

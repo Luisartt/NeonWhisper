@@ -141,6 +141,12 @@ class MeetingPopup(QWidget):
         self._appear()
         self._auto_hide.start(4000)
 
+    def set_sources(self, sources: str) -> None:
+        """Qué se está grabando ahora («micro + sistema»), por si silencias una fuente."""
+        self._sources = sources
+        if self.state == "recording":
+            self._tick()
+
     def _tick(self) -> None:
         secs = int(time.monotonic() - self._started)
         clock = f"{secs // 60}:{secs % 60:02d}"

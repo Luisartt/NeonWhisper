@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QFont, QShowEvent
+from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
@@ -284,7 +284,6 @@ class HomePage(QWidget):
         self.orb.setFixedHeight(172)
         self.orb.clicked.connect(ctl.toggle_recording)
         self.status = QLabel("Cargando Whisper…")
-        self.status.setFont(T.display_font(14, QFont.Weight.Bold))
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status.setProperty("role", "status")
         add_glow(self.status, blur=22, alpha=0.45)
@@ -554,7 +553,7 @@ class HistoryPage(QWidget):
 # --- Reuniones ----------------------------------------------------------------
 def summary_html(text: str) -> str:
     """El resumen viene en markdown sencillo (## títulos y viñetas): se pinta como texto con formato."""
-    lines = []
+    lines = ["<div style='line-height:140%'>"]
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
@@ -567,7 +566,7 @@ def summary_html(text: str) -> str:
             lines.append(f"<div style='margin-left:6px;'>•&nbsp; {line.lstrip('-*• ')}</div>")
         else:
             lines.append(f"<div>{line}</div>")
-    return "".join(lines)
+    return "".join(lines) + "</div>"
 
 
 class MeetingCard(QFrame):
@@ -618,7 +617,9 @@ class MeetingCard(QFrame):
         body.setContentsMargins(0, 8, 0, 0)
         body.setSpacing(6)
         if meeting.summary:
-            summary = label("", "body", wrap=True)
+            summary = QLabel()  # texto enriquecido propio: no pasa por WrapLabel
+            summary.setWordWrap(True)
+            summary.setProperty("role", "body")
             summary.setTextFormat(Qt.TextFormat.RichText)
             on_restyle(summary, lambda text=meeting.summary: summary.setText(summary_html(text)))
             summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -1515,7 +1516,7 @@ class MainWindow(QMainWindow):
         name = QLabel()
         on_restyle(name, lambda: name.setText(
             f"<span style='color:{T.ICE}'>NEON</span><span style='color:{T.TEXT}'>WHISPER</span>"))
-        name.setFont(T.display_font(14, QFont.Weight.Bold))
+        name.setObjectName("Brand")  # el tamaño va en la hoja de estilos: si no, la pisa
         add_glow(name, blur=24, alpha=0.5)
         brand.addWidget(name)
         brand.addStretch(1)

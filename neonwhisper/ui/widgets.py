@@ -1,4 +1,5 @@
 """Widgets pintados a mano: logo, orbe del micrófono, barras de voz, switches, teclas y tarjetas de tema."""
+import html
 import math
 import time
 from collections import deque
@@ -136,11 +137,31 @@ def set_glyph_icon(button: QAbstractButton, factory: Callable[[], QIcon]) -> Non
     on_restyle(button, lambda: button.setIcon(factory()))
 
 
+class WrapLabel(QLabel):
+    """Párrafo de varias líneas con interlineado holgado.
+
+    Qt no entiende `line-height` en la hoja de estilos, pero sí en texto enriquecido: por eso el
+    texto se envuelve en un div (y se escapa, porque aquí caen transcripciones del usuario).
+    """
+
+    def __init__(self, text: str = ""):
+        super().__init__()
+        self.setWordWrap(True)
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:
+        self._plain = text
+        super().setText(f"<div style='line-height:140%'>{html.escape(text)}</div>")
+
+    def text(self) -> str:
+        return self._plain
+
+
 def label(text: str = "", role: str | None = None, wrap: bool = False) -> QLabel:
-    lbl = QLabel(text)
+    lbl = WrapLabel(text) if wrap else QLabel(text)
     if role:
         lbl.setProperty("role", role)
-    lbl.setWordWrap(wrap)
     return lbl
 
 

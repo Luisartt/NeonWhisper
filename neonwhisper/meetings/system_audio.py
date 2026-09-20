@@ -19,13 +19,20 @@ from neonwhisper.audio import SAMPLE_RATE, level_of
 log = logging.getLogger(__name__)
 
 BLOCK_FRAMES = 1600  # 0.1 s a 16 kHz
-OPEN_TIMEOUT = 5.0
+OPEN_TIMEOUT = 1.5  # corto a propósito: esto se espera desde el hilo de la interfaz
 
 
 def _soundcard():
     """Se importa tarde: solo hace falta al grabar una reunión."""
     import soundcard
 
+    # `soundcard` crea un objeto COM de módulo cuyo destructor llama `CoUninitialize()`, y Python
+    # puede ejecutar ese destructor en cualquier hilo: soltar COM desde un hilo que no lo inicializó
+    # mata el proceso. Como cada hilo de aquí administra su propio COM, se lo quitamos de encima.
+    try:
+        soundcard.mediafoundation._com.com_loaded = False
+    except Exception:  # noqa: BLE001 - fuera de Windows, o si cambia la librería
+        log.debug("No se pudo ajustar la gestión de COM de soundcard")
     return soundcard
 
 
@@ -89,27 +96,34 @@ class SystemAudioSource:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        self._stop.clear()
+        # Un Event nuevo por arranque: si se reutilizara, un `clear()` podría revivir al hilo
+        # anterior y acabaríamos con dos capturas escribiendo en el mismo buffer.
+        self._stop = threading.Event()
         self._ready.clear()
         self._error = None
-        self._thread = threading.Thread(target=self._run, name="loopback", daemon=True)
+        with self._lock:  # lo que quedó del intento anterior ya no está alineado con el micrófono
+            self.buffer = np.zeros(0, dtype=np.float32)
+        self._thread = threading.Thread(target=self._run, args=(self._stop,), name="loopback", daemon=True)
         self._thread.start()
         if not self._ready.wait(OPEN_TIMEOUT):
             self._stop.set()
+            thread, self._thread = self._thread, None
+            if thread is not None:
+                thread.join(timeout=2)
             raise RuntimeError("El audio del sistema tardó demasiado en abrirse")
         if self._error is not None:
             raise RuntimeError(f"No se pudo capturar el audio del sistema: {self._error}")
         self.last_block = time.monotonic()
 
-    def _run(self) -> None:
+    def _run(self, stop: threading.Event) -> None:
         com = False
         try:
             import ctypes
 
-            # COM se inicializa aquí, en modo STA, por dos razones: WASAPI lo necesita en cada hilo,
-            # y así `soundcard` ve que el hilo ya tiene otro modelo y no intenta administrarlo él
-            # (si lo administra, suelta COM desde el hilo equivocado y Windows mata el proceso).
-            com = ctypes.windll.ole32.CoInitializeEx(None, 0x2) == 0
+            # WASAPI necesita COM en el hilo que lo usa. Se suelta en el `finally` de este mismo
+            # hilo: soltarlo desde otro es lo que antes tumbaba la app.
+            # S_OK (0) y S_FALSE (1) suman a la cuenta de COM: las dos hay que soltarlas.
+            com = ctypes.windll.ole32.CoInitializeEx(None, 0x2) in (0, 1)
         except Exception:  # noqa: BLE001 - fuera de Windows no hace falta
             pass
         try:
@@ -117,7 +131,7 @@ class SystemAudioSource:
             with mic.recorder(samplerate=SAMPLE_RATE, blocksize=BLOCK_FRAMES) as rec:
                 self._ready.set()
                 log.info("Audio del sistema: capturando «%s»", self.label)
-                while not self._stop.is_set():
+                while not stop.is_set():
                     block = rec.record(numframes=BLOCK_FRAMES)
                     mono = block.mean(axis=1) if block.ndim > 1 else block
                     mono = mono.astype(np.float32)
@@ -137,6 +151,15 @@ class SystemAudioSource:
                     ctypes.windll.ole32.CoUninitialize()
                 except Exception:  # noqa: BLE001
                     log.exception("No se pudo soltar COM del hilo de captura")
+
+    @property
+    def alive(self) -> bool:
+        """False si el hilo de captura murió (se desconectaron los audífonos, por ejemplo)."""
+        return self._thread is not None and self._thread.is_alive() and self._error is None
+
+    @property
+    def error(self) -> str:
+        return str(self._error) if self._error else ""
 
     def take(self, count: int) -> np.ndarray:
         with self._lock:

@@ -70,6 +70,7 @@ class Controller(QObject):
         self.meeting_queue: list[tuple[int, int, int, str, float, float]] = []  # tramos por transcribir
         self.meeting_parts: dict[int, list[str]] = {}
         self.live_text: list[str] = []      # transcripción en vivo de la reunión en curso
+        self._follow_failed = ""            # salida que no se pudo capturar: no insistir
         self._live_offset = 0.0             # hasta qué segundo del .wav se ha transcrito en vivo
         self._live_pending = 0.0            # segundos pedidos y aún sin respuesta
         self.paster = Paster()
@@ -487,6 +488,8 @@ class Controller(QObject):
     def mute_meeting_source(self, kind: str, muted: bool) -> None:
         """Silencia tu micrófono o el audio del sistema mientras se graba la reunión."""
         self.meeting_recorder.set_muted(kind, muted)
+        if self.meeting_popup.state == "recording":
+            self.meeting_popup.set_sources(self.meeting_recorder.describe_short())
         self._set_ui_state()
 
     def stop_meeting(self) -> None:
@@ -496,7 +499,7 @@ class Controller(QObject):
         self._follow_timer.stop()
         meeting_id = self.meeting_id
         path, seconds = self.meeting_recorder.stop()
-        self.detector.forget()
+        self.detector.dismiss()
         self._meeting_id = 0
         log.info("Reunión %s terminada: %.0f s", meeting_id, seconds)
         if seconds < self.settings.meeting_min_seconds:
@@ -579,6 +582,7 @@ class Controller(QObject):
                     path.unlink(missing_ok=True)
 
     def _queue_meeting(self, meeting_id: int, path: str, seconds: float) -> None:
+        self.meeting_queue = [c for c in self.meeting_queue if c[0] != meeting_id]  # p. ej. doble clic en Reintentar
         total = max(1, math.ceil(seconds / MEETING_CHUNK_SECONDS))
         self.meeting_parts[meeting_id] = []
         for index in range(total):
@@ -589,15 +593,24 @@ class Controller(QObject):
         self._next_chunk()
 
     def _follow_meeting_audio(self) -> None:
-        """Si cambias de salida a media reunión (te pones los audífonos), se captura la nueva."""
+        """Sigue la salida PREDETERMINADA de Windows: si la cambias a media reunión, se captura esa.
+
+        No sigue la salida de la app de la reunión (eso requería leer las sesiones de audio por
+        proceso, que es justo lo que tumbaba la app), así que con ruteo por aplicación no aplica.
+        """
         recorder = self.meeting_recorder
         if not recorder.recording or not recorder.system_audio:
             self._follow_timer.stop()
             return
         target = default_speaker_name()
-        if target and recorder.follow_to(target):
+        if not target or target == self._follow_failed:  # ya falló: no volver a colgar la interfaz
+            return
+        if recorder.follow_to(target):
+            self._follow_failed = ""
             log.info("Reunión: ahora se captura la salida «%s»", target)
             self.window.meetings.set_live(recorder, self.meetings.get(self.meeting_id))
+        else:
+            self._follow_failed = target
 
     def _live_tick(self) -> None:
         """Transcribe el tramo nuevo de la reunión en curso, si no hay algo más urgente en la GPU."""
@@ -606,7 +619,9 @@ class Controller(QObject):
             return
         if self.meeting_queue or not recorder.path:  # hay una reunión anterior en cola: primero esa
             return
-        available = recorder.elapsed - LIVE_MARGIN - self._live_offset
+        # Contra el .wav, no contra el reloj: si una fuente se queda muda, el archivo va más atrás
+        # que la reunión y pediríamos audio que todavía no existe (y se perdería para siempre).
+        available = wav_duration(recorder.path) - LIVE_MARGIN - self._live_offset
         if available < LIVE_CHUNK_SECONDS:
             return
         self._live_pending = available
@@ -666,11 +681,10 @@ class Controller(QObject):
             self.window.meetings.refresh()
             self._notify_meeting_ready(meeting_id)
 
-    def on_meeting_failed(self, meeting_id: int, message: str) -> None:
-        if self._live_pending:  # falló un tramo en vivo: se reintenta con el siguiente
+    def on_meeting_failed(self, meeting_id: int, index: int, total: int, message: str) -> None:
+        if total == 0:  # tramo de la transcripción en vivo: se reintenta con el siguiente
             self._live_pending = 0.0
-            if meeting_id == self.meeting_id and self.meeting_recorder.recording:
-                return
+            return
         self.meeting_queue = [c for c in self.meeting_queue if c[0] != meeting_id]
         self.meeting_parts.pop(meeting_id, None)
         self.meetings.update(meeting_id, state="error", error=message[:200])

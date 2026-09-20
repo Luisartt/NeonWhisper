@@ -173,6 +173,7 @@ class MeetingDetector(QObject):
         self.settings = settings
         self.ignore = ignore or set()
         self.current: Meeting | None = None
+        self._dismissed = False  # paraste a mano: no volver a grabar esta misma reunión
         self._hits = 0
         self._misses = 0
         self._timer = QTimer(self, interval=POLL_MS, timeout=self.poll)
@@ -197,20 +198,30 @@ class MeetingDetector(QObject):
         if found:
             self._misses = 0
             self._hits += 1
-            if self.current is None and self._hits >= STARTS_AFTER:
+            if self.current is None and not self._dismissed and self._hits >= STARTS_AFTER:
                 self.current = found
                 log.info("Reunión detectada: %s (%s)", found.app, found.process)
                 self.started.emit(found)
         else:
             self._hits = 0
             self._misses += 1
+            if self._misses >= ENDS_AFTER:
+                self._dismissed = False  # la reunión terminó de verdad: volvemos a vigilar
             if self.current is not None and self._misses >= ENDS_AFTER:
                 log.info("Reunión terminada: %s", self.current.app)
                 self.current = None
                 self.ended.emit()
 
     def forget(self) -> None:
-        """Olvida la reunión en curso (p. ej. si la paras a mano y no quieres que vuelva a empezar)."""
+        """Olvida la reunión en curso (al cerrar la app o apagar la vigilancia)."""
         self.current = None
+        self._dismissed = False
+        self._hits = 0
+        self._misses = 0
+
+    def dismiss(self) -> None:
+        """Paraste la grabación a mano: no se vuelve a grabar hasta que salgas de la reunión."""
+        self.current = None
+        self._dismissed = True
         self._hits = 0
         self._misses = 0
