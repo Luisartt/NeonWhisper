@@ -187,7 +187,6 @@ PAGE_BOTTOM = 24
 SECTION_GAP = 24      # entre secciones
 CARD_GAP = 12         # entre tarjetas de una misma fila
 CARD_PAD = 22         # aire dentro de una tarjeta
-BLOCK_GAP = 20        # nombre anterior de la separación entre bloques
 CONTENT_MAX = 1200    # el contenido no se estira más que esto en pantallas grandes
 
 # --- Tipografías --------------------------------------------------------------

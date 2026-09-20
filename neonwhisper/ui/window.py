@@ -845,7 +845,12 @@ class MeetingsPage(QWidget):
         self._compact = None
         self.set_compact(False)
         self.live.hide()
-        root.addWidget(self.live)
+        content = QWidget()
+        stack = QVBoxLayout(content)
+        stack.setContentsMargins(0, 2, 10, 6)
+        stack.setSpacing(T.SECTION_GAP)
+        stack.addWidget(self.live)
+        root.addWidget(scrollable(content, limit=False), 1)
         self._clock = QTimer(self, interval=1000, timeout=self._tick)
 
         # Preguntar a tus reuniones, con el modelo local.
@@ -867,7 +872,7 @@ class MeetingsPage(QWidget):
         self.answer.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.answer.hide()
         ask_box.addWidget(self.answer)
-        root.addWidget(self.ask_card)
+        stack.addWidget(self.ask_card)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Buscar en tus reuniones…")
@@ -876,13 +881,14 @@ class MeetingsPage(QWidget):
         self.search.setClearButtonEnabled(True)
         self._debounce = QTimer(self, singleShot=True, interval=180, timeout=self.refresh)
         self.search.textChanged.connect(self._debounce.start)
-        root.addWidget(self.search)
+        stack.addWidget(self.search)
 
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
-        self.list_layout.setContentsMargins(0, 2, 10, 6)
+        self.list_layout.setContentsMargins(0, 0, 0, 0)
         self.list_layout.setSpacing(T.CARD_GAP)
-        root.addWidget(scrollable(self.list_host), 1)
+        stack.addWidget(self.list_host)
+        stack.addStretch(1)
         self.refresh()
 
     # --- ventana angosta -----------------------------------------------------

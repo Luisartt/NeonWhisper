@@ -276,8 +276,11 @@ class ElidedLabel(QLabel):
         self._full = text
         if role:
             self.setProperty("role", role)
-        # Ignored en el ancho: la etiqueta nunca obliga a la tarjeta a crecer.
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def minimumSizeHint(self) -> QSize:
+        # Puede encogerse hasta casi nada: así una fila larga no obliga a la tarjeta a crecer
+        # (y el texto se corta con «…» en vez de salirse), pero sigue pidiendo su ancho natural.
+        return QSize(24, super().minimumSizeHint().height())
 
     def setText(self, text: str) -> None:
         self._full = text

@@ -370,7 +370,3 @@ class MeetingPopup(QWidget):
         p.drawEllipse(QPointF(cx, cy), 6.8 * beat, 6.8 * beat)
         p.setBrush(QColor(accent))
         p.drawEllipse(QPointF(cx, cy), 4, 4)
-        if self.state == "error":  # el error no late: se queda quieto y se ve
-            p.setPen(QColor(T.HI))
-            p.setFont(T.display_font(7))
-            p.drawText(QRectF(cx - 8, cy - 8, 16, 16), Qt.AlignmentFlag.AlignCenter, "!")
