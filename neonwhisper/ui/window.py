@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import (
-    QBoxLayout, QButtonGroup, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout,
-    QWidget,
+    QBoxLayout, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+    QGraphicsOpacityEffect, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy,
+    QSlider, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from neonwhisper import __version__
@@ -694,8 +694,24 @@ class MeetingCard(QFrame):
         v.setContentsMargins(T.CARD_PAD, T.CARD_PAD, ACTION_EDGE, T.CARD_PAD)
         v.setSpacing(GAP_M)
 
+        self._compact = False
+        self._selecting = False
+
         top = QHBoxLayout()
         top.setSpacing(GAP_M)
+        # La casilla solo sale en modo selección: el resto del tiempo la tarjeta se ve igual que siempre.
+        self.check = QCheckBox()
+        self.check.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.check.setEnabled(meeting.state != "grabando")
+        self.check.setToolTip("Marcar esta reunión" if self.check.isEnabled()
+                              else "No se puede borrar una reunión que se está grabando")
+        if not self.check.isEnabled():
+            # Apagada se ve igual que sin marcar: se atenúa para que se note que no se puede.
+            faded = QGraphicsOpacityEffect(self.check)
+            faded.setOpacity(0.35)
+            self.check.setGraphicsEffect(faded)
+        self.check.hide()
+        top.addWidget(self.check, 0, Qt.AlignmentFlag.AlignVCenter)
         titles = QVBoxLayout()
         titles.setSpacing(GAP_XS)
         titles.addWidget(ElidedLabel(meeting.label, "title"))
@@ -776,9 +792,31 @@ class MeetingCard(QFrame):
         v.addWidget(self.body)
 
     def set_compact(self, compact: bool) -> None:
+        self._compact = compact
+        self._apply_actions()
+
+    def set_selecting(self, selecting: bool) -> None:
+        """En modo selección aparece la casilla y se guardan las acciones de una sola reunión."""
+        self._selecting = selecting
+        self.check.setVisible(selecting)
+        if not selecting:
+            self.check.setChecked(False)
+        elif self.open:
+            self._toggle()  # desplegada estorba: se cierra al entrar al modo
+        self._apply_actions()
+
+    def _apply_actions(self) -> None:
+        show = not self._selecting
+        self.toggle.setVisible(show)
         for b in self.extra:
-            b.setVisible(not compact)
-        self.more.setVisible(compact)
+            b.setVisible(show and not self._compact)
+        self.more.setVisible(show and self._compact)
+
+    def mouseReleaseEvent(self, event):
+        # Eligiendo varias, el clic en cualquier parte de la tarjeta la marca o la desmarca.
+        if self._selecting and self.check.isEnabled() and event.button() == Qt.MouseButton.LeftButton:
+            self.check.setChecked(not self.check.isChecked())
+        super().mouseReleaseEvent(event)
 
     def _toggle(self) -> None:
         self.open = not self.open
@@ -820,6 +858,8 @@ class MeetingsPage(QWidget):
         super().__init__()
         self.ctl = ctl
         self.cards: dict[int, MeetingCard] = {}
+        self._selecting = False
+        self._selected: set[int] = set()
         root = page_body(self)
         root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN - SCROLL_GUTTER, T.PAGE_BOTTOM)
         root.setSpacing(T.SECTION_GAP)
@@ -948,7 +988,35 @@ class MeetingsPage(QWidget):
         self.search.setClearButtonEnabled(True)
         self._debounce = QTimer(self, singleShot=True, interval=180, timeout=self.refresh)
         self.search.textChanged.connect(self._debounce.start)
-        stack.addWidget(self.search)
+        search_row = QWidget()
+        sr = QHBoxLayout(search_row)
+        sr.setContentsMargins(0, 0, 0, 0)
+        sr.setSpacing(GAP_M)
+        sr.addWidget(self.search, 1)
+        self.select_btn = icon_button(T.Glyph.CHECK, "Seleccionar",
+                                      tooltip="Elegir varias reuniones para borrarlas de golpe")
+        self.select_btn.clicked.connect(lambda: self._set_selecting(not self._selecting))
+        sr.addWidget(self.select_btn)
+        stack.addWidget(search_row)
+
+        # Barra de selección: solo está cuando la usas, para no cargar la página el resto del tiempo.
+        self.select_bar = card(glow=True)
+        sb = QHBoxLayout(self.select_bar)
+        sb.setContentsMargins(T.CARD_PAD, GAP_M, T.CARD_PAD, GAP_M)  # es una barra, no una tarjeta de contenido
+        sb.setSpacing(GAP_M)
+        self.select_count = ElidedLabel("", "title")
+        sb.addWidget(self.select_count, 1)
+        all_btn = icon_button(T.Glyph.CHECK, "Todas", variant="ghost", tooltip="Marcar todas las de la lista")
+        all_btn.clicked.connect(self._select_all)
+        none_btn = icon_button(T.Glyph.CLEAR, "Ninguna", variant="ghost", tooltip="Quitar la selección")
+        none_btn.clicked.connect(self._select_none)
+        self.delete_selected = icon_button(T.Glyph.DELETE, "Borrar", variant="danger",
+                                           tooltip="Borrar las reuniones marcadas")
+        self.delete_selected.clicked.connect(self._delete_selected)
+        for b in (all_btn, none_btn, self.delete_selected):
+            sb.addWidget(b)
+        self.select_bar.hide()
+        stack.addWidget(self.select_bar)
 
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
@@ -1045,6 +1113,54 @@ class MeetingsPage(QWidget):
             card_widget.state.setText(text)
             set_tone(card_widget.state, "accent")
 
+    # --- elegir varias y borrarlas de golpe ----------------------------------
+    def _set_selecting(self, on: bool) -> None:
+        self._selecting = on
+        self.select_btn.setText("Listo" if on else "Seleccionar")
+        self.select_bar.setVisible(on)
+        self._selected.clear()
+        for card_widget in self.cards.values():
+            card_widget.set_selecting(on)
+        self._update_selection()
+
+    def _on_check(self, meeting_id: int, checked: bool) -> None:
+        if checked:
+            self._selected.add(meeting_id)
+        else:
+            self._selected.discard(meeting_id)
+        self._update_selection()
+
+    def _update_selection(self) -> None:
+        count = len(self._selected)
+        self.select_count.setText(
+            "Ninguna seleccionada" if not count else
+            "1 reunión seleccionada" if count == 1 else f"{count} reuniones seleccionadas")
+        self.delete_selected.setText(f"Borrar {count}" if count else "Borrar")
+        self.delete_selected.setEnabled(bool(count))
+
+    def _select_all(self) -> None:
+        for card_widget in self.cards.values():
+            if card_widget.check.isEnabled():  # la que se está grabando, no
+                card_widget.check.setChecked(True)
+
+    def _select_none(self) -> None:
+        for card_widget in self.cards.values():
+            card_widget.check.setChecked(False)
+
+    def _delete_selected(self) -> None:
+        ids = sorted(i for i in self._selected if i in self.cards and self.cards[i].check.isEnabled())
+        if not ids:
+            return
+        how_many = "1 reunión" if len(ids) == 1 else f"{len(ids)} reuniones"
+        if not confirm(self, "Borrar reuniones",
+                       f"¿Borrar {how_many} con su transcripción, su resumen y tus notas? "
+                       "Esta acción no se puede deshacer.", f"Borrar {how_many}"):
+            return
+        self.ctl.delete_meetings(ids)
+        self._set_selecting(False)
+        self.refresh()
+        self.ctl.window.home.refresh()  # los números de arriba del panel cambian
+
     # --- lista ---------------------------------------------------------------
     def refresh(self) -> None:
         while self.list_layout.count():
@@ -1064,9 +1180,21 @@ class MeetingsPage(QWidget):
         for meeting in meetings:
             card_widget = MeetingCard(meeting, self.ctl)
             card_widget.set_compact(bool(self._compact))
+            card_widget.set_selecting(self._selecting)
+            card_widget.check.toggled.connect(
+                lambda on, meeting_id=meeting.id: self._on_check(meeting_id, on))
             self.cards[meeting.id] = card_widget
             self.list_layout.addWidget(card_widget)
         self.list_layout.addStretch(1)
+        self.select_btn.setEnabled(bool(meetings))
+        if self._selecting and not meetings:
+            self._set_selecting(False)
+        elif self._selecting:
+            # Tras buscar o borrar, la selección se queda solo con lo que sigue en la lista.
+            self._selected &= set(self.cards)
+            for meeting_id in self._selected:
+                self.cards[meeting_id].check.setChecked(True)
+            self._update_selection()
 
 
 # --- Modelos ------------------------------------------------------------------
