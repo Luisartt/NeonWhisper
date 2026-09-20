@@ -17,6 +17,7 @@ from neonwhisper.fmt import fmt_bytes, fmt_eta, fmt_speed
 from neonwhisper.history import Entry
 from neonwhisper.mictest import MeetingAudioTester, MicTester
 from neonwhisper.paths import DATA_DIR, MODELS_DIR
+from neonwhisper.summarizer import TEMPLATES
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.widgets import (
     GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot, ThemeCard, ToggleSwitch, WaveBars,
@@ -445,6 +446,13 @@ class MeetingCard(QFrame):
             summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             body.addWidget(summary)
             body.addSpacing(10)
+        body.addWidget(label("TUS NOTAS", "eyebrow"))
+        self.notes = QPlainTextEdit(meeting.notes)
+        self.notes.setPlaceholderText("Lo que anotaste en la reunión. Puedes seguir escribiendo aquí.")
+        self.notes.setFixedHeight(90)
+        self.notes.textChanged.connect(self._save_notes)
+        body.addWidget(self.notes)
+        body.addSpacing(10)
         body.addWidget(label("TRANSCRIPCIÓN", "eyebrow"))
         text = QPlainTextEdit(meeting.transcript or "Sin transcripción.")
         text.setReadOnly(True)
@@ -457,6 +465,14 @@ class MeetingCard(QFrame):
         self.open = not self.open
         self.body.setVisible(self.open)
         self.toggle.setText("Ocultar" if self.open else "Ver")
+
+    def _save_notes(self) -> None:
+        """Las notas se guardan solas, medio segundo después de dejar de escribir."""
+        if not hasattr(self, "_notes_timer"):
+            self._notes_timer = QTimer(self, singleShot=True, interval=600)
+            self._notes_timer.timeout.connect(
+                lambda: self.ctl.meetings.update(self.meeting.id, notes=self.notes.toPlainText()))
+        self._notes_timer.start()
 
     def _copy(self) -> None:
         self.ctl.paster.copy(self.meeting.summary or self.meeting.transcript)
@@ -501,9 +517,14 @@ class MeetingsPage(QWidget):
 
         # Tarjeta de la reunión en curso.
         self.live = card(glow=True)
-        live = QHBoxLayout(self.live)
-        live.setContentsMargins(20, 14, 20, 14)
+        live_box = QVBoxLayout(self.live)
+        live_box.setContentsMargins(20, 14, 20, 14)
+        live_box.setSpacing(12)
+        live_row = QWidget()
+        live = QHBoxLayout(live_row)
+        live.setContentsMargins(0, 0, 0, 0)
         live.setSpacing(16)
+        live_box.addWidget(live_row)
         self.live_dot = StatusDot()
         self.live_dot.state = "recording"
         live.addWidget(self.live_dot, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -539,9 +560,53 @@ class MeetingsPage(QWidget):
         stop = icon_button(T.Glyph.PAUSE, "Detener")
         stop.clicked.connect(ctl.toggle_meeting)
         live.addWidget(stop, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Debajo: lo que se va transcribiendo y un bloc para tus notas.
+        panel = QHBoxLayout()
+        panel.setSpacing(16)
+        transcript_box = QVBoxLayout()
+        transcript_box.setSpacing(4)
+        transcript_box.addWidget(label("EN VIVO", "eyebrow"))
+        self.live_view = QPlainTextEdit()
+        self.live_view.setReadOnly(True)
+        self.live_view.setFixedHeight(120)
+        self.live_view.setPlaceholderText("La transcripción aparecerá aquí cada ~30 segundos…")
+        transcript_box.addWidget(self.live_view)
+        panel.addLayout(transcript_box, 1)
+        notes_box = QVBoxLayout()
+        notes_box.setSpacing(4)
+        notes_box.addWidget(label("TUS NOTAS", "eyebrow"))
+        self.notes_view = QPlainTextEdit()
+        self.notes_view.setFixedHeight(120)
+        self.notes_view.setPlaceholderText("Apunta lo que importa: entra en el resumen final.")
+        self.notes_view.textChanged.connect(lambda: ctl.set_meeting_notes(self.notes_view.toPlainText()))
+        notes_box.addWidget(self.notes_view)
+        panel.addLayout(notes_box, 1)
+        live_box.addLayout(panel)
         self.live.hide()
         root.addWidget(self.live)
         self._clock = QTimer(self, interval=1000, timeout=self._tick)
+
+        # Preguntar a tus reuniones, con el modelo local.
+        self.ask_card = card()
+        ask_box = QVBoxLayout(self.ask_card)
+        ask_box.setContentsMargins(20, 14, 20, 14)
+        ask_box.setSpacing(8)
+        ask_row = QHBoxLayout()
+        ask_row.setSpacing(10)
+        self.ask_input = QLineEdit()
+        self.ask_input.setPlaceholderText("Pregúntale a tus reuniones: «¿qué quedó pendiente para mí?»")
+        self.ask_input.returnPressed.connect(self._ask)
+        ask_btn = icon_button(T.Glyph.BOLT, "Preguntar", variant="primary")
+        ask_btn.clicked.connect(self._ask)
+        ask_row.addWidget(self.ask_input, 1)
+        ask_row.addWidget(ask_btn)
+        ask_box.addLayout(ask_row)
+        self.answer = label("", "muted", wrap=True)
+        self.answer.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.answer.hide()
+        ask_box.addWidget(self.answer)
+        root.addWidget(self.ask_card)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Buscar en tus reuniones…")
@@ -572,6 +637,12 @@ class MeetingsPage(QWidget):
             button.setChecked(bool(sources.get(kind)))
             button.setToolTip("" if available else "Windows no expone un dispositivo «loopback» en esta PC")
             repolish(button)
+        if active and not self._clock.isActive():  # empieza una reunión: panel limpio
+            self.live_view.setPlainText(" ".join(self.ctl.live_text))
+            self.notes_view.blockSignals(True)
+            self.notes_view.setPlainText(meeting.notes if meeting else "")
+            self.notes_view.blockSignals(False)
+            self.live_view.setVisible(self.ctl.settings.meeting_live_transcript)
         if active:
             self.live_title.setText(f"Grabando · {meeting.label if meeting else 'reunión'}")
             self._recorder = recorder
@@ -580,6 +651,31 @@ class MeetingsPage(QWidget):
                 self._clock.start()
         else:
             self._clock.stop()
+
+    def append_live(self, text: str) -> None:
+        """Añade el último tramo transcrito mientras la reunión sigue."""
+        if not text:
+            return
+        self.live_view.setPlainText((self.live_view.toPlainText() + " " + text).strip())
+        bar = self.live_view.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _ask(self) -> None:
+        question = self.ask_input.text().strip()
+        if question:
+            self.ctl.ask_meetings(question)
+
+    def show_answer(self, question: str, answer: str, error: str) -> None:
+        """Respuesta del modelo local (o el estado de «pensando…»)."""
+        if error:
+            text, tone = error, "danger"
+        elif answer:
+            text, tone = answer, "muted"
+        else:
+            text, tone = f"Pensando en «{question[:60]}»…", "dim"
+        self.answer.setText(text)
+        set_tone(self.answer, tone)
+        self.answer.show()
 
     def _tick(self) -> None:
         recorder = getattr(self, "_recorder", None)
@@ -870,6 +966,13 @@ class SettingsPage(QWidget):
         self.meeting_audio_status.hide()
         sec.addWidget(self.meeting_audio_status)
         sec.addWidget(separator())
+        self._row(sec, "Transcripción en vivo",
+                  "Ir transcribiendo mientras la reunión ocurre, en la pestaña Reuniones.",
+                  self._toggle(s.meeting_live_transcript,
+                               lambda v: ctl.update_setting("meeting_live_transcript", v)))
+        self._row(sec, "Plantilla del resumen", "El formato del resumen según el tipo de reunión.",
+                  self._combo({k: f"{name} · {desc}" for k, (name, desc, _) in TEMPLATES.items()},
+                              s.meeting_template, lambda v: ctl.update_setting("meeting_template", v)))
         self._row(sec, "Resumen automático", "El modelo que escribe el resumen al terminar la reunión.",
                   self._combo({**{"": "Solo transcripción, sin resumen"}, **SUMMARY_MODELS},
                               s.meeting_summary_model,

@@ -2,6 +2,7 @@
 import ctypes
 import logging
 import math
+import re
 import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -33,6 +34,8 @@ from neonwhisper.ui.window import MainWindow
 log = logging.getLogger(APP_NAME)
 MIN_SECONDS = 0.35
 MEETING_CHUNK_SECONDS = 300  # se transcribe la reunión de 5 en 5 minutos, para poder dictar entremedio
+LIVE_CHUNK_SECONDS = 25      # tramo de la transcripción en vivo (mientras la reunión sigue)
+LIVE_MARGIN = 1.5            # no se lee el último tramo del .wav: aún se está escribiendo
 OWN_PROCESSES = {"neonwhisper.exe", "pythonw.exe", "python.exe"}  # no cuentan como "reunión"
 OVERLAY_KEYS = ("overlay_style", "overlay_scale", "overlay_bg_opacity", "overlay_opacity")
 SINGLE_INSTANCE_KEY = "NeonWhisper-single-instance"
@@ -42,7 +45,8 @@ class Controller(QObject):
     request_load = Signal(str, str)
     request_transcribe = Signal(object, str, str)
     request_chunk = Signal(int, int, int, str, float, float, str, str)
-    request_summary = Signal(int, str, str, str)
+    request_summary = Signal(int, str, str, str, str, str)
+    request_ask = Signal(str, str, str, str)
     download_changed = Signal(str)
     download_installed = Signal(str)
 
@@ -64,6 +68,9 @@ class Controller(QObject):
         self.meeting_recorder = MeetingRecorder()
         self.meeting_queue: list[tuple[int, int, int, str, float, float]] = []  # tramos por transcribir
         self.meeting_parts: dict[int, list[str]] = {}
+        self.live_text: list[str] = []      # transcripción en vivo de la reunión en curso
+        self._live_offset = 0.0             # hasta qué segundo del .wav se ha transcrito en vivo
+        self._live_pending = 0.0            # segundos pedidos y aún sin respuesta
         self.paster = Paster()
         self.model_state = "loading"
         self.model_usable = False
@@ -88,6 +95,9 @@ class Controller(QObject):
         self.summarizer = Summarizer()
         self.summarizer.moveToThread(self.worker_thread)
         self.request_summary.connect(self.summarizer.summarize)
+        self.request_ask.connect(self.summarizer.ask)
+        self.summarizer.answered.connect(self.on_answer)
+        self.summarizer.ask_failed.connect(self.on_answer_failed)
         self.summarizer.progress.connect(self.on_summary_progress)
         self.summarizer.finished.connect(self.on_summarized)
         self.summarizer.failed.connect(self.on_summary_failed)
@@ -107,6 +117,8 @@ class Controller(QObject):
         self._detected = None  # última reunión detectada (DetectedMeeting)
         self._apply_overlay_look()
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.settings.save)
+        self._live_timer = QTimer(self, interval=4000, timeout=self._live_tick)
+        self._notes_timer = QTimer(self, singleShot=True, interval=800, timeout=self._save_notes)
 
         self.hotkeys = HotkeyManager()
         try:
@@ -458,6 +470,9 @@ class Controller(QObject):
         self._meeting_id = meeting.id
         detail = self.meeting_recorder.describe()
         log.info("Grabando reunión %s (%s) en %s", meeting.id, detail, path)
+        self.live_text, self._live_offset, self._live_pending = [], 0.0, 0.0
+        if self.settings.meeting_live_transcript:
+            self._live_timer.start()
         self.tray.showMessage("NeonWhisper", f"Grabando la reunión de {app} ({detail}).", self.icon_active, 4000)
         if self.settings.meeting_popup:
             self.meeting_popup.show_recording(app, self.meeting_recorder.describe_short())
@@ -472,6 +487,7 @@ class Controller(QObject):
     def stop_meeting(self) -> None:
         if not self.meeting_recorder.recording:
             return
+        self._live_timer.stop()
         meeting_id = self.meeting_id
         path, seconds = self.meeting_recorder.stop()
         self.detector.forget()
@@ -492,6 +508,54 @@ class Controller(QObject):
         self.window.meetings.refresh()
         self._queue_meeting(meeting_id, str(path), seconds)
         self._set_ui_state()
+
+    def set_meeting_notes(self, text: str) -> None:
+        """Las notas que escribes durante la reunión (se guardan solas, sin pelear con cada tecla)."""
+        self._notes = text
+        self._notes_timer.start()
+
+    def _save_notes(self) -> None:
+        meeting_id = self.meeting_id
+        if meeting_id:
+            self.meetings.update(meeting_id, notes=getattr(self, "_notes", ""))
+
+    def ask_meetings(self, question: str) -> None:
+        """Pregunta sobre tus reuniones, respondida en local con el modelo de resumen."""
+        model = self.settings.meeting_summary_model
+        if not model or not model_downloaded(model):
+            self.window.meetings.show_answer(question, "", "Descarga el modelo de resumen para poder preguntar.")
+            return
+        context = self._ask_context(question)
+        if not context:
+            self.window.meetings.show_answer(question, "", "Todavía no hay reuniones transcritas.")
+            return
+        self.window.meetings.show_answer(question, "", "")  # estado "pensando…"
+        self.request_ask.emit(question, context, model, self.settings.device)
+
+    def _ask_context(self, question: str, meetings: int = 3, chars: int = 4000) -> str:
+        """Las reuniones más relacionadas con la pregunta (y si no, las últimas)."""
+        words = {w for w in re.findall(r"\w{4,}", question.lower())}
+        scored = []
+        for meeting in self.meetings.list(limit=60):
+            text = f"{meeting.summary}\n{meeting.notes}\n{meeting.transcript}".strip()
+            if not text:
+                continue
+            haystack = f"{meeting.label} {text}".lower()
+            score = sum(haystack.count(word) for word in words)
+            scored.append((score, meeting.id, meeting, text))
+        if not scored:
+            return ""
+        scored.sort(key=lambda row: (row[0], row[1]), reverse=True)
+        parts = []
+        for _, _, meeting, text in scored[:meetings]:
+            parts.append(f"### {meeting.label} ({meeting.created_at[:10]})\n{text[:chars]}")
+        return "\n\n".join(parts)
+
+    def on_answer(self, question: str, answer: str) -> None:
+        self.window.meetings.show_answer(question, answer, "")
+
+    def on_answer_failed(self, message: str) -> None:
+        self.window.meetings.show_answer("", "", f"No se pudo responder: {message[:120]}")
 
     def _recover_meetings(self) -> None:
         """Reuniones que quedaron a medias (la app se cerró de golpe): se retoman al arrancar."""
@@ -518,6 +582,29 @@ class Controller(QObject):
             )
         self._next_chunk()
 
+    def _live_tick(self) -> None:
+        """Transcribe el tramo nuevo de la reunión en curso, si no hay algo más urgente en la GPU."""
+        recorder = self.meeting_recorder
+        if not recorder.recording or not self.model_usable or self._live_pending or self.jobs:
+            return
+        if self.meeting_queue or not recorder.path:  # hay una reunión anterior en cola: primero esa
+            return
+        available = recorder.elapsed - LIVE_MARGIN - self._live_offset
+        if available < LIVE_CHUNK_SECONDS:
+            return
+        self._live_pending = available
+        # index/total = 0 marca "esto es en vivo" (no forma parte de la transcripción final).
+        self.request_chunk.emit(self.meeting_id, 0, 0, str(recorder.path), self._live_offset, available,
+                                self.settings.language, self.settings.initial_prompt)
+
+    def _on_live_chunk(self, meeting_id: int, text: str) -> None:
+        self._live_offset += self._live_pending
+        self._live_pending = 0.0
+        if not text or meeting_id != self.meeting_id:
+            return
+        self.live_text.append(text)
+        self.window.meetings.append_live(text)
+
     def _next_chunk(self) -> None:
         """Pide un tramo cada vez: así un dictado se cuela entre tramo y tramo."""
         if not self.meeting_queue or not self.model_usable:
@@ -527,6 +614,9 @@ class Controller(QObject):
                                 self.settings.language, self.settings.initial_prompt)
 
     def on_meeting_chunk(self, meeting_id: int, index: int, total: int, text: str) -> None:
+        if total == 0:  # tramo de la transcripción en vivo
+            self._on_live_chunk(meeting_id, text)
+            return
         if self.meeting_queue and self.meeting_queue[0][0] == meeting_id and self.meeting_queue[0][1] == index:
             self.meeting_queue.pop(0)
         self.meeting_parts.setdefault(meeting_id, []).append(text)
@@ -551,7 +641,8 @@ class Controller(QObject):
         if model and model_downloaded(model):
             self.meetings.update(meeting_id, state="resumiendo")
             self.window.meetings.refresh()
-            self.request_summary.emit(meeting_id, transcript, model, self.settings.device)
+            self.request_summary.emit(meeting_id, transcript, model, self.settings.device,
+                                      (meeting.notes if meeting else ""), self.settings.meeting_template)
         else:
             reason = "" if not model else f"el modelo {model} no está descargado"
             self.meetings.update(meeting_id, state="lista", error=reason)
@@ -559,6 +650,10 @@ class Controller(QObject):
             self._notify_meeting_ready(meeting_id)
 
     def on_meeting_failed(self, meeting_id: int, message: str) -> None:
+        if self._live_pending:  # falló un tramo en vivo: se reintenta con el siguiente
+            self._live_pending = 0.0
+            if meeting_id == self.meeting_id and self.meeting_recorder.recording:
+                return
         self.meeting_queue = [c for c in self.meeting_queue if c[0] != meeting_id]
         self.meeting_parts.pop(meeting_id, None)
         self.meetings.update(meeting_id, state="error", error=message[:200])

@@ -24,6 +24,7 @@ class Meeting:
     summary: str
     state: str
     error: str
+    notes: str = ""     # lo que tú escribiste durante la reunión
 
     @property
     def label(self) -> str:
@@ -34,7 +35,7 @@ class Meeting:
         return len(self.transcript.split())
 
 
-_COLUMNS = "id, created_at, app, title, duration, audio_path, transcript, summary, state, error"
+_COLUMNS = "id, created_at, app, title, duration, audio_path, transcript, summary, state, error, notes"
 
 
 class MeetingStore:
@@ -52,9 +53,14 @@ class MeetingStore:
                 transcript TEXT NOT NULL DEFAULT '',
                 summary TEXT NOT NULL DEFAULT '',
                 state TEXT NOT NULL DEFAULT 'grabando',
-                error TEXT NOT NULL DEFAULT ''
+                error TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT ''
             )"""
         )
+        # Bases de datos de versiones anteriores: se añade la columna que falte.
+        existing = {row[1] for row in self._db.execute("PRAGMA table_info(meetings)")}
+        if "notes" not in existing:
+            self._db.execute("ALTER TABLE meetings ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
         self._db.commit()
 
     def add(self, app: str, title: str, audio_path: str) -> Meeting:
@@ -65,12 +71,12 @@ class MeetingStore:
                 (created, app, title, audio_path),
             )
             self._db.commit()
-        return Meeting(cur.lastrowid, created, app, title, 0.0, audio_path, "", "", "grabando", "")
+        return Meeting(cur.lastrowid, created, app, title, 0.0, audio_path, "", "", "grabando", "", "")
 
     def update(self, meeting_id: int, **fields) -> None:
         if not fields:
             return
-        allowed = {"app", "title", "duration", "audio_path", "transcript", "summary", "state", "error"}
+        allowed = {"app", "title", "duration", "audio_path", "transcript", "summary", "state", "error", "notes"}
         fields = {k: v for k, v in fields.items() if k in allowed}
         sets = ", ".join(f"{k} = ?" for k in fields)
         with self._lock:
@@ -86,8 +92,8 @@ class MeetingStore:
         sql = f"SELECT {_COLUMNS} FROM meetings"
         args: tuple = ()
         if query:
-            sql += " WHERE transcript LIKE ? OR summary LIKE ? OR title LIKE ? OR app LIKE ?"
-            args = tuple([f"%{query}%"] * 4)
+            sql += " WHERE transcript LIKE ? OR summary LIKE ? OR title LIKE ? OR app LIKE ? OR notes LIKE ?"
+            args = tuple([f"%{query}%"] * 5)
         sql += " ORDER BY id DESC LIMIT ?"
         with self._lock:
             rows = self._db.execute(sql, args + (limit,)).fetchall()

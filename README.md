@@ -27,7 +27,11 @@
 - **Vocabulario personalizado** para que escriba bien nombres propios y términos técnicos.
 - **Prueba de micrófono**: graba 4 segundos, mide el nivel y te reproduce lo que grabó.
 - **Gestor de modelos**: descarga con barra de progreso, velocidad y tiempo restante; pausa, continúa (incluso después de cerrar la app) o cancela. Usa varias conexiones en paralelo y verifica cada archivo.
-- **Graba tus reuniones solo** (Ajustes → Reuniones): detecta cuándo entras a una reunión de Teams, Zoom, Meet, Webex o Discord, graba tu micrófono **y lo que suena en tu PC**, y al terminar te deja la **transcripción completa** y un **resumen** con temas, decisiones y tareas. Todo en tu computadora.
+- **Graba tus reuniones solo** (Ajustes → Reuniones): detecta cuándo entras a una reunión de Teams, Zoom, Meet, Webex o Discord mirando qué app abrió el micrófono en Windows, graba tu micrófono **y lo que suena en tu PC** (WASAPI loopback: funciona con bocinas, audífonos USB o HDMI, sin instalar nada), y al terminar te deja la **transcripción completa** y un **resumen**. Todo en tu computadora.
+- **Aviso flotante**: al detectar la reunión aparece un recuadro pequeño arriba a la izquierda con un botón **Grabar** (y el cronómetro con **Detener** mientras graba).
+- **Transcripción en vivo y tus notas**: ve lo que se va diciendo mientras la reunión ocurre y apunta lo tuyo al lado; tus notas entran en el resumen final.
+- **Plantillas de resumen**: acta, 1:1, entrevista, llamada de ventas o daily.
+- **Pregúntale a tus reuniones**: «¿qué quedó pendiente para mí?» — responde el modelo local con lo que digan tus transcripciones, citando de qué reunión sale cada dato.
 - **Programa de verdad**: se instala en Archivos de programa, corre como `NeonWhisper.exe` y aparece en *Aplicaciones instaladas* de Windows, con su botón de desinstalar.
 - **Privado**: tu voz nunca sale de tu computadora.
 

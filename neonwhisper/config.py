@@ -63,6 +63,8 @@ class Settings:
     meeting_keep_audio: bool = False  # conservar el .wav después de transcribir
     meeting_min_seconds: int = 60  # reuniones más cortas que esto se descartan
     meeting_summary_model: str = "llama-3.2-3b"  # ver SUMMARY_MODELS ("" = solo transcripción)
+    meeting_template: str = "acta"  # plantilla del resumen (ver summarizer.TEMPLATES)
+    meeting_live_transcript: bool = True  # ir transcribiendo mientras la reunión ocurre
     meeting_apps: str = ""  # apps extra que cuentan como reunión, separadas por comas
 
     @classmethod
