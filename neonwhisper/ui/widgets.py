@@ -188,24 +188,27 @@ class CardFlow(QLayout):
         return self.minimumSize()
 
     def minimumSize(self) -> QSize:
+        m = self.contentsMargins()
         height = max((i.sizeHint().height() for i in self._items), default=0)
-        return QSize(self._min_w, height)
+        return QSize(self._min_w + m.left() + m.right(), height + m.top() + m.bottom())
 
     # --- acomodo --------------------------------------------------------------
     def _arrange(self, rect: QRect, place: bool) -> int:
         if not self._items:
             return 0
+        m = self.contentsMargins()
+        area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
         gap = self.spacing()
-        cols = max(1, min(len(self._items), (rect.width() + gap) // (self._min_w + gap)))
-        item_w = (rect.width() - (cols - 1) * gap) / cols
+        cols = max(1, min(len(self._items), (area.width() + gap) // (self._min_w + gap)))
+        item_w = (area.width() - (cols - 1) * gap) / cols
         row_h = max(i.sizeHint().height() for i in self._items)
         rows = -(-len(self._items) // cols)
         if place:
             for index, item in enumerate(self._items):
-                x = rect.x() + (index % cols) * (item_w + gap)
-                y = rect.y() + (index // cols) * (row_h + gap)
+                x = area.x() + (index % cols) * (item_w + gap)
+                y = area.y() + (index // cols) * (row_h + gap)
                 item.setGeometry(QRect(QPoint(round(x), round(y)), QSize(round(item_w), row_h)))
-        return rows * row_h + (rows - 1) * gap
+        return rows * row_h + (rows - 1) * gap + m.top() + m.bottom()
 
 
 def add_shadow(widget: QWidget, blur: int = 26, dy: int = 6, alpha: float = 0.28) -> None:
@@ -227,6 +230,50 @@ def card(glow: bool = False, shadow: bool = True) -> QFrame:
     if shadow:
         add_shadow(frame)
     return frame
+
+
+class ElidedLabel(QLabel):
+    """Etiqueta que corta el texto con «…» cuando no cabe, en vez de desbordarse de su tarjeta."""
+
+    def __init__(self, text: str = "", role: str | None = None):
+        super().__init__(text)
+        self._full = text
+        if role:
+            self.setProperty("role", role)
+        # Ignored en el ancho: la etiqueta nunca obliga a la tarjeta a crecer.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def setText(self, text: str) -> None:
+        self._full = text
+        super().setText(text)
+        self.setToolTip(text)
+
+    def text(self) -> str:
+        return self._full
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        p.setPen(self.palette().color(self.foregroundRole()))
+        fm = QFontMetrics(self.font())
+        shown = fm.elidedText(self._full, Qt.TextElideMode.ElideRight, self.width())
+        p.drawText(self.rect(), int(self.alignment()) | int(Qt.TextFlag.TextSingleLine), shown)
+
+
+class ClickCard(QFrame):
+    """Tarjeta que responde al clic completo (el panel de inicio lleva a su pestaña)."""
+
+    clicked = Signal()
+
+    def __init__(self, name: str = "Tile"):
+        super().__init__()
+        self.setObjectName(name)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
 
 
 class Logo(QWidget):

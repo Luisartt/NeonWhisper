@@ -20,9 +20,9 @@ from neonwhisper.paths import DATA_DIR, MODELS_DIR
 from neonwhisper.summarizer import TEMPLATES
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.widgets import (
-    CardFlow, GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot, ThemeCard, ToggleSwitch,
-    WaveBars, add_glow, card, glyph_icon, label, make_app_icon, on_restyle, repolish, restyle, set_glyph_icon,
-    set_tone,
+    CardFlow, ClickCard, ElidedLabel, GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot,
+    ThemeCard, ToggleSwitch, WaveBars, add_glow, card, glyph_icon, label, make_app_icon, on_restyle, repolish,
+    restyle, set_glyph_icon, set_tone,
 )
 from neonwhisper.ui.overlay_styles import STYLES
 
@@ -30,6 +30,10 @@ if TYPE_CHECKING:
     from neonwhisper.app import Controller
 
 MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+
+# Color del estado de una reunión (en el panel de inicio y en la lista de Reuniones).
+STATE_TONES = {"grabando": "danger", "transcribiendo": "accent", "resumiendo": "accent", "lista": "ok",
+               "error": "danger"}
 
 
 class NoWheelComboBox(QComboBox):
@@ -137,82 +141,203 @@ def download_text(info) -> tuple[str, str]:
 
 
 # --- Inicio -------------------------------------------------------------------
+def one_line(text: str, limit: int = 160) -> str:
+    """Deja un texto de varias líneas en una sola, para las tarjetas del panel."""
+    clean = " ".join(text.split())
+    return clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "…"
+
+
+def fmt_minutes(seconds: float) -> str:
+    minutes = round(seconds / 60)
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60:02d} min"
+
+
+def fmt_hours(hours: float) -> str:
+    return f"{hours:.1f} h" if hours >= 1 else f"{round(hours * 60)} min"
+
+
+def stat_tile(title: str) -> tuple[QFrame, QLabel]:
+    """Un número grande con su etiqueta: (tarjeta, etiqueta del número)."""
+    tile = card()
+    tile.setFixedHeight(96)
+    v = QVBoxLayout(tile)
+    v.setContentsMargins(18, 14, 18, 14)
+    v.setSpacing(0)
+    value = label("—", "stat")
+    v.addWidget(ElidedLabel(title, "mini"))
+    v.addWidget(value)
+    return tile, value
+
+
+def panel_row(title: str, meta: str, state: str = "", tone: str | None = None) -> QFrame:
+    """Una línea dentro de una tarjeta del panel: texto, datos y, si aplica, su estado."""
+    row = QFrame()
+    row.setObjectName("Row")
+    h = QHBoxLayout(row)
+    h.setContentsMargins(12, 9, 12, 9)
+    h.setSpacing(12)
+    texts = QVBoxLayout()
+    texts.setSpacing(2)
+    head = ElidedLabel(title)
+    head.setProperty("role", "strong")
+    texts.addWidget(head)
+    texts.addWidget(ElidedLabel(meta, "dim"))
+    h.addLayout(texts, 1)
+    if state:
+        chip = label(state, "chip")
+        set_tone(chip, tone)
+        h.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
+    return row
+
+
+class PanelCard(ClickCard):
+    """Tarjeta del panel: encabezado, filas y «ver todo». El clic lleva a su pestaña."""
+
+    def __init__(self, glyph: str, title: str, hint: str, on_open) -> None:
+        super().__init__()
+        self.setMinimumHeight(212)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(16, 18, 16, 16)
+        v.setSpacing(10)
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        head.setContentsMargins(6, 0, 6, 0)
+        head.addWidget(GlyphLabel(glyph, "CYAN", 18))
+        head.addWidget(label(title, "h2"))
+        head.addStretch(1)
+        head.addWidget(label(hint, "mini"))
+        v.addLayout(head)
+        self.rows = QVBoxLayout()
+        self.rows.setSpacing(2)
+        v.addLayout(self.rows)
+        v.addStretch(1)
+        self.clicked.connect(on_open)
+
+    def fill(self, rows: list[QFrame], empty: str) -> None:
+        while self.rows.count():
+            item = self.rows.takeAt(0)
+            old = item.widget()
+            if old is not None:
+                old.setParent(None)  # sin esto se sigue viendo hasta que Qt lo borra
+                old.deleteLater()
+        if not rows:
+            blank = label(empty, "muted", wrap=True)
+            blank.setContentsMargins(12, 10, 12, 10)
+            self.rows.addWidget(blank)
+        for row in rows:
+            self.rows.addWidget(row)
+
+
 class HomePage(QWidget):
+    """Panel de control: qué está pasando, qué grabaste y los accesos rápidos."""
+
     def __init__(self, ctl: "Controller"):
         super().__init__()
         self.ctl = ctl
-        root = QVBoxLayout(self)
-        root.setContentsMargins(44, 34, 44, 30)
-        root.setSpacing(18)
+        self._last = ""
+        inner = QWidget()
+        root = QVBoxLayout(inner)
+        root.setContentsMargins(T.PAGE_MARGIN, 30, T.PAGE_MARGIN - 8, 28)
+        root.setSpacing(T.BLOCK_GAP)
         root.addLayout(page_header(
-            "DICTADO LOCAL · WHISPER",
-            "Habla. Se escribe solo.",
-            "Presiona tu atajo en cualquier aplicación, dicta y el texto aparece donde está tu cursor.",
+            "TODO EN TU PC · WHISPER",
+            "Tu panel",
+            "Dicta con tu atajo en cualquier app, graba tus reuniones y revisa aquí lo que ya quedó guardado.",
         ))
 
-        body = QHBoxLayout()
-        body.setSpacing(22)
-        root.addLayout(body, 1)
+        hero = QHBoxLayout()
+        hero.setSpacing(T.BLOCK_GAP)
+        root.addLayout(hero)
+        hero.addWidget(self._dictation_card(), 5)
+        hero.addLayout(self._side_column(), 4)
+        root.addWidget(self._stats_row())
 
-        # Columna del micrófono
+        # Tarjetas clicables: cada una lleva a su pestaña.
+        panels_host = QWidget()
+        panels = CardFlow(250, T.BLOCK_GAP, panels_host)
+        panels.setContentsMargins(0, 0, 0, 10)  # aire para la sombra de la última fila
+        self.meetings_card = PanelCard(T.Glyph.MEETING, "Reuniones", "VER TODAS  ›", lambda: self._go(2))
+        self.notes_card = PanelCard(T.Glyph.PASTE, "Tus notas", "ABRIR  ›", lambda: self._go(2))
+        self.dictations_card = PanelCard(T.Glyph.HISTORY, "Dictados", "VER TODOS  ›", lambda: self._go(1))
+        for panel in (self.meetings_card, self.notes_card, self.dictations_card):
+            panels.addWidget(panel)
+        root.addWidget(panels_host)
+        root.addStretch(1)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scrollable(inner))
+        self.refresh()
+
+    # --- piezas del panel -----------------------------------------------------
+    def _dictation_card(self) -> QFrame:
+        ctl = self.ctl
         mic_card = card(glow=True)
         mic = QVBoxLayout(mic_card)
-        mic.setContentsMargins(24, 10, 24, 22)
+        mic.setContentsMargins(T.CARD_PAD, 16, T.CARD_PAD, 18)
         mic.setSpacing(8)
         level = lambda: ctl.recorder.level  # noqa: E731
         self.orb = MicOrb(level)
-        self.orb.setFixedHeight(300)
+        self.orb.setMinimumSize(160, 160)
+        self.orb.setFixedHeight(172)
         self.orb.clicked.connect(ctl.toggle_recording)
         self.status = QLabel("Cargando Whisper…")
-        self.status.setFont(T.display_font(15))
+        self.status.setFont(T.display_font(14, QFont.Weight.Bold))
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status.setProperty("role", "status")
         add_glow(self.status, blur=22, alpha=0.45)
-        self.bars = WaveBars(level, height=46)
+        self.bars = WaveBars(level, height=34)
         hot = QHBoxLayout()
         hot.addStretch(1)
         self.keycaps = KeyCaps(ctl.settings.hotkey)
         hot.addWidget(self.keycaps)
         hot.addStretch(1)
-        self.mode_label = label(mode_hint(ctl.settings.mode), "dim")
+        self.mode_label = label(mode_hint(ctl.settings.mode), "dim", wrap=True)
         self.mode_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.dictate_btn = QPushButton("Dictar ahora")
+        self.dictate_btn.setProperty("variant", "hero")
+        self.dictate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.dictate_btn.clicked.connect(ctl.toggle_recording)
+        # Los stretch dejan el orbe centrado y el botón siempre abajo, sin huecos raros en medio.
         mic.addStretch(1)
         mic.addWidget(self.orb)
         mic.addWidget(self.status)
-        mic.addSpacing(4)
         mic.addWidget(self.bars)
-        mic.addSpacing(14)
+        mic.addSpacing(6)
         mic.addLayout(hot)
         mic.addWidget(self.mode_label)
         mic.addStretch(1)
-        body.addWidget(mic_card, 5)
+        mic.addWidget(self.dictate_btn)
+        return mic_card
 
-        # Columna lateral
-        side_host = QWidget()
-        side_host.setMinimumWidth(300)
-        side = QVBoxLayout(side_host)
-        side.setContentsMargins(0, 0, 0, 0)
-        side.setSpacing(16)
-        body.addWidget(side_host, 3)
+    def _side_column(self) -> QVBoxLayout:
+        side = QVBoxLayout()
+        side.setSpacing(T.BLOCK_GAP)
 
-        stats = card()
-        grid = QHBoxLayout(stats)
-        grid.setContentsMargins(20, 14, 20, 14)
-        grid.setSpacing(12)
-        self.stat_count = label("0", "stat")
-        self.stat_words = label("0", "stat")
-        self.stat_speed = label("—", "stat")
-        for title, value in (("DICTADOS", self.stat_count), ("PALABRAS", self.stat_words), ("LATENCIA", self.stat_speed)):
-            col = QVBoxLayout()
-            col.setSpacing(0)
-            col.addWidget(label(title, "mini"))
-            col.addWidget(value)
-            grid.addLayout(col, 1)
-        side.addWidget(stats)
+        meeting_card = card()
+        mv = QVBoxLayout(meeting_card)
+        mv.setContentsMargins(T.CARD_PAD, 18, T.CARD_PAD, 20)
+        mv.setSpacing(10)
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        head.addWidget(GlyphLabel(T.Glyph.MEETING, "CYAN", 18))
+        head.addWidget(label("Reuniones", "h2"))
+        head.addStretch(1)
+        mv.addLayout(head)
+        self.meeting_hint = label("", "muted", wrap=True)
+        mv.addWidget(self.meeting_hint)
+        self.meeting_btn = QPushButton("Grabar reunión")
+        self.meeting_btn.setProperty("variant", "hero2")
+        self.meeting_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.meeting_btn.clicked.connect(self.ctl.toggle_meeting)
+        mv.addWidget(self.meeting_btn)
+        side.addWidget(meeting_card)
 
         last = card()
         lv = QVBoxLayout(last)
-        lv.setContentsMargins(20, 16, 20, 16)
+        lv.setContentsMargins(T.CARD_PAD, 18, T.CARD_PAD, 18)
         lv.setSpacing(10)
         top = QHBoxLayout()
         top.addWidget(label("ÚLTIMA TRANSCRIPCIÓN", "eyebrow"))
@@ -221,31 +346,84 @@ class HomePage(QWidget):
         self.copy_last.clicked.connect(self._copy_last)
         top.addWidget(self.copy_last)
         lv.addLayout(top)
-        self.last_text = label("Todavía no has dictado nada. Prueba tu atajo o haz clic en el micrófono.", "muted", wrap=True)
+        self.last_text = label("Todavía no has dictado nada. Prueba tu atajo o haz clic en el micrófono.",
+                               "muted", wrap=True)
         self.last_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.last_text.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.last_text.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         lv.addWidget(self.last_text, 1)
         side.addWidget(last, 1)
+        return side
 
-        tips = card()
-        tv = QVBoxLayout(tips)
-        tv.setContentsMargins(20, 14, 20, 14)
-        tv.setSpacing(6)
-        tv.addWidget(label("TIPS", "eyebrow"))
-        for tip in (
-            "Esc cancela la grabación.",
-            "Todo corre en tu PC: tu voz no sale a internet.",
-            "Agrega nombres propios en Ajustes › Vocabulario.",
-        ):
-            tv.addWidget(label(f"›  {tip}", "muted", wrap=True))
-        side.addWidget(tips)
-        self._last = ""
+    def _stats_row(self) -> QWidget:
+        host = QWidget()
+        tiles = CardFlow(138, 14, host)
+        tiles.setContentsMargins(0, 0, 0, 8)  # aire para la sombra
+        self.tiles: dict[str, QLabel] = {}
+        for key, title in (("dictados", "DICTADOS"), ("palabras", "PALABRAS"),
+                           ("reuniones", "REUNIONES"), ("tiempo", "TIEMPO GRABADO")):
+            tile, value = stat_tile(title)
+            self.tiles[key] = value
+            tiles.addWidget(tile)
+        return host
 
+    # --- datos ----------------------------------------------------------------
+    def refresh(self) -> None:
+        """Vuelve a leer reuniones, notas y dictados. Se llama al entrar a la pestaña."""
+        meetings = self.ctl.meetings.list(limit=20)
+        rows = []
+        for meeting in meetings[:4]:
+            meta = f"{human_date(meeting.created_at)}   ·   {fmt_minutes(meeting.duration)}"
+            rows.append(panel_row(meeting.label, meta, meeting.state.capitalize(),
+                                  STATE_TONES.get(meeting.state, "muted")))
+        self.meetings_card.fill(rows, "Todavía no grabas ninguna reunión. Dale a «Grabar reunión» "
+                                      "o actívalas en Ajustes.")
+
+        notes = []
+        for meeting in meetings:
+            if meeting.notes.strip():
+                notes.append(panel_row(one_line(meeting.notes), f"{meeting.label}   ·   "
+                                                                f"{human_date(meeting.created_at)}"))
+            if len(notes) == 4:
+                break
+        self.notes_card.fill(notes, "Lo que anotes durante una reunión se guarda con ella y aparece aquí.")
+
+        entries = self.ctl.history.list(limit=4)
+        rows = [panel_row(one_line(e.text), f"{human_date(e.created_at)}   ·   {len(e.text.split())} palabras")
+                for e in entries]
+        self.dictations_card.fill(rows, "Aquí van tus últimos dictados. Prueba tu atajo en cualquier app.")
+
+        count, hours = self.ctl.meetings.stats()
+        self.tiles["reuniones"].setText(f"{count:,}")
+        self.tiles["tiempo"].setText(fmt_hours(hours))
+        self._update_meeting_hint()
+
+    def _update_meeting_hint(self) -> None:
+        recording = self.ctl.meeting_recorder.recording
+        self.meeting_btn.setText("Detener la reunión" if recording else "Grabar reunión")
+        if recording:
+            text = f"Grabando {self.ctl.meeting_recorder.describe()}. Al terminar la transcribo y la resumo."
+        elif self.ctl.settings.meetings_enabled:
+            text = "Detecto cuando entras a una junta y te aviso. Al terminar dejo transcripción y resumen."
+        else:
+            text = "Puedes grabar una junta cuando quieras. Para que se detecten solas, actívalo en Ajustes."
+        self.meeting_hint.setText(text)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.refresh()
+
+    def _go(self, index: int) -> None:
+        self.ctl.window.go_to(index)
+
+    # --- lo que llama el controlador -----------------------------------------
     def set_state(self, state: str, text: str) -> None:
         self.orb.set_state(state)
         self.bars.set_mode({"recording": "recording", "processing": "processing"}.get(state, "idle"))
         self.status.setText(text)
+        self.dictate_btn.setText("Detener y pegar" if state == "recording" else "Dictar ahora")
+        self.dictate_btn.setEnabled(state != "disabled")
+        self._update_meeting_hint()
 
     def set_last(self, text: str) -> None:
         self._last = text
@@ -254,10 +432,10 @@ class HomePage(QWidget):
         repolish(self.last_text)
 
     def set_stats(self, count: int, words: int, seconds: float | None) -> None:
-        self.stat_count.setText(f"{count:,}")
-        self.stat_words.setText(f"{words:,}")
-        if seconds is not None:
-            self.stat_speed.setText(f"{seconds:.1f}s")
+        self.tiles["dictados"].setText(f"{count:,}")
+        self.tiles["palabras"].setText(f"{words:,}")
+        if self.isVisible():
+            self.refresh()
 
     def set_hotkey(self, hotkey: str, mode: str) -> None:
         self.keycaps.set_hotkey(hotkey)
@@ -339,8 +517,10 @@ class HistoryPage(QWidget):
     def refresh(self) -> None:
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            old = item.widget()
+            if old is not None:
+                old.setParent(None)  # sin esto se sigue viendo hasta que Qt lo borra
+                old.deleteLater()
         query = self.search.text().strip()
         entries = self.ctl.history.list(query, limit=300)
         if not entries:
@@ -372,10 +552,6 @@ class HistoryPage(QWidget):
 
 
 # --- Reuniones ----------------------------------------------------------------
-STATE_TONES = {"grabando": "danger", "transcribiendo": "accent", "resumiendo": "accent", "lista": "ok",
-               "error": "danger"}
-
-
 def summary_html(text: str) -> str:
     """El resumen viene en markdown sencillo (## títulos y viñetas): se pinta como texto con formato."""
     lines = []
@@ -697,8 +873,10 @@ class MeetingsPage(QWidget):
     def refresh(self) -> None:
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            old = item.widget()
+            if old is not None:
+                old.setParent(None)  # sin esto se sigue viendo hasta que Qt lo borra
+                old.deleteLater()
         self.cards.clear()
         query = self.search.text().strip()
         meetings = self.ctl.meetings.list(query)
@@ -1367,6 +1545,9 @@ class MainWindow(QMainWindow):
             nav_group.addButton(btn)
             sv.addWidget(btn)
         self.nav_buttons = nav_group.buttons()
+        # Al volver a Inicio, el panel vuelve a leer reuniones, notas y dictados.
+        self.stack.currentChanged.connect(
+            lambda index: self.home.refresh() if index == 0 else None)
         sv.addStretch(1)
 
         status = card()
