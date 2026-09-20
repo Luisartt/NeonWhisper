@@ -348,6 +348,7 @@ QPushButton[variant="hero2"]:hover {{ background: {t.hover_bg}; border-color: {t
 QPushButton[variant="ghost"] {{ background: transparent; border: 1px solid transparent; color: {t.muted}; padding: 6px 12px; }}
 QPushButton[variant="ghost"]:hover {{ color: {t.ice}; background: {t.bg3}; border-color: {t.line_hi}; }}
 QPushButton[variant="danger"]:hover {{ border-color: {t.danger}; color: {t.danger}; }}
+QPushButton::menu-indicator {{ image: none; width: 0; }}
 
 QPushButton#NavButton {{
     text-align: left; padding: 12px 16px; border-radius: {R_CTRL}px; font-size: 11pt; font-weight: 600;

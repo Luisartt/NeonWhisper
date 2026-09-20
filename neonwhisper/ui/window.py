@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
+    QButtonGroup, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
+    QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from neonwhisper import __version__
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from neonwhisper.app import Controller
 
 MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+COMPACT_WIDTH = 820  # por debajo de esto, Reuniones se apila y esconde los iconos en un menú
 
 # Color del estado de una reunión (en el panel de inicio y en la lista de Reuniones).
 STATE_TONES = {"grabando": "rec", "transcribiendo": "accent", "resumiendo": "accent", "lista": "ok",
@@ -90,7 +91,11 @@ def page_body(page: QWidget) -> QVBoxLayout:
     outer.setContentsMargins(0, 0, 0, 0)
     body = QWidget()
     body.setMaximumWidth(T.CONTENT_MAX)
-    outer.addWidget(body, 1, Qt.AlignmentFlag.AlignHCenter)
+    # Los dos espaciadores solo se reparten lo que sobra cuando el cuerpo ya llegó a su tope:
+    # con una alineación en su lugar, el cuerpo se quedaría en su ancho natural y sería un hilo.
+    outer.addStretch(1)
+    outer.addWidget(body, 1000)
+    outer.addStretch(1)
     return QVBoxLayout(body)
 
 
@@ -505,7 +510,7 @@ class EntryCard(QFrame):
         top = QHBoxLayout()
         words = len(entry.text.split())
         meta = f"{human_date(entry.created_at)}   ·   {entry.duration:.0f} s   ·   {words} palabra{'s' if words != 1 else ''}"
-        top.addWidget(label(meta, "dim"))
+        top.addWidget(ElidedLabel(meta, "dim"))
         top.addStretch(1)
         self.copy_btn = icon_button(T.Glyph.COPY, variant="ghost", tooltip="Copiar")
         self.copy_btn.clicked.connect(self._copy)
@@ -630,10 +635,10 @@ class MeetingCard(QFrame):
         top.setSpacing(12)
         titles = QVBoxLayout()
         titles.setSpacing(2)
-        titles.addWidget(label(meeting.label, "title"))
+        titles.addWidget(ElidedLabel(meeting.label, "title"))
         minutes = meeting.duration / 60
         meta = f"{human_date(meeting.created_at)}   ·   {minutes:.0f} min   ·   {meeting.words} palabras"
-        titles.addWidget(label(meta, "dim"))
+        titles.addWidget(ElidedLabel(meta, "dim"))
         top.addLayout(titles, 1)
 
         self.state = label("", "detail")
@@ -649,12 +654,29 @@ class MeetingCard(QFrame):
         export.clicked.connect(self._export)
         delete = icon_button(T.Glyph.DELETE, variant="ghost", tooltip="Borrar la reunión")
         delete.clicked.connect(self._delete)
-        for b in (self.toggle, copy_btn, export, delete):
-            top.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+        top.addWidget(self.toggle, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.extra = [copy_btn, export, delete]
+        actions = [("Copiar el resumen", self._copy), ("Guardar como .txt", self._export),
+                   ("Borrar la reunión", self._delete)]
         if meeting.state == "error" or (meeting.state == "lista" and not meeting.summary):
             retry = icon_button(T.Glyph.RETRY, variant="ghost", tooltip="Reintentar")
             retry.clicked.connect(lambda: ctl.retry_meeting(meeting.id))
-            top.addWidget(retry, 0, Qt.AlignmentFlag.AlignVCenter)
+            self.extra.append(retry)
+            actions.append(("Reintentar", lambda: ctl.retry_meeting(meeting.id)))
+        for b in self.extra:
+            top.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+        # En la ventana angosta los iconos no caben: se guardan aquí y no se pierde ninguna acción.
+        self.more = QPushButton("···")
+        self.more.setProperty("variant", "ghost")
+        self.more.setFixedSize(34, 34)
+        self.more.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.more.setToolTip("Más acciones")
+        menu = QMenu(self.more)
+        for text, slot in actions:
+            menu.addAction(text, slot)
+        self.more.setMenu(menu)
+        self.more.hide()
+        top.addWidget(self.more, 0, Qt.AlignmentFlag.AlignVCenter)
         v.addLayout(top)
 
         self.body = QWidget()
@@ -685,6 +707,11 @@ class MeetingCard(QFrame):
         body.addWidget(text)
         self.body.hide()
         v.addWidget(self.body)
+
+    def set_compact(self, compact: bool) -> None:
+        for b in self.extra:
+            b.setVisible(not compact)
+        self.more.setVisible(compact)
 
     def _toggle(self) -> None:
         self.open = not self.open
@@ -756,8 +783,8 @@ class MeetingsPage(QWidget):
         live.addWidget(self.live_dot, 0, Qt.AlignmentFlag.AlignVCenter)
         texts = QVBoxLayout()
         texts.setSpacing(2)
-        self.live_title = label("Grabando reunión", "title")
-        self.live_detail = label("", "dim")
+        self.live_title = ElidedLabel("Grabando reunión", "title")
+        self.live_detail = ElidedLabel("", "dim")
         texts.addWidget(self.live_title)
         texts.addWidget(self.live_detail)
         live.addLayout(texts, 1)
@@ -770,6 +797,7 @@ class MeetingsPage(QWidget):
         pl = QHBoxLayout(picker)
         pl.setContentsMargins(0, 0, 0, 0)
         pl.setSpacing(0)
+        self.source_names = {"mic": ("Mi voz", "Voz"), "system": ("Los demás", "Sistema")}
         for pos, (kind, text, glyph) in enumerate((("mic", "Mi voz", T.Glyph.MIC),
                                                    ("system", "Los demás", T.Glyph.VOLUME))):
             b = QPushButton(f" {text}")
@@ -788,9 +816,11 @@ class MeetingsPage(QWidget):
         live.addWidget(stop, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Debajo: lo que se va transcribiendo y un bloc para tus notas.
-        panel = QHBoxLayout()
-        panel.setSpacing(16)
-        transcript_box = QVBoxLayout()
+        self.panel = QGridLayout()
+        self.panel.setSpacing(16)
+        transcript_host = QWidget()
+        transcript_box = QVBoxLayout(transcript_host)
+        transcript_box.setContentsMargins(0, 0, 0, 0)
         transcript_box.setSpacing(4)
         transcript_box.addWidget(label("EN VIVO", "eyebrow"))
         self.live_view = QPlainTextEdit()
@@ -799,8 +829,9 @@ class MeetingsPage(QWidget):
         self.live_view.setMaximumHeight(260)
         self.live_view.setPlaceholderText("La transcripción aparecerá aquí cada ~30 segundos…")
         transcript_box.addWidget(self.live_view)
-        panel.addLayout(transcript_box, 1)
-        notes_box = QVBoxLayout()
+        notes_host = QWidget()
+        notes_box = QVBoxLayout(notes_host)
+        notes_box.setContentsMargins(0, 0, 0, 0)
         notes_box.setSpacing(4)
         notes_box.addWidget(label("TUS NOTAS", "eyebrow"))
         self.notes_view = QPlainTextEdit()
@@ -809,8 +840,10 @@ class MeetingsPage(QWidget):
         self.notes_view.setPlaceholderText("Apunta lo que importa: entra en el resumen final.")
         self.notes_view.textChanged.connect(lambda: ctl.set_meeting_notes(self.notes_view.toPlainText()))
         notes_box.addWidget(self.notes_view)
-        panel.addLayout(notes_box, 1)
-        live_box.addLayout(panel)
+        self._panel_hosts = (transcript_host, notes_host)
+        live_box.addLayout(self.panel)
+        self._compact = None
+        self.set_compact(False)
         self.live.hide()
         root.addWidget(self.live)
         self._clock = QTimer(self, interval=1000, timeout=self._tick)
@@ -851,6 +884,27 @@ class MeetingsPage(QWidget):
         self.list_layout.setSpacing(T.CARD_GAP)
         root.addWidget(scrollable(self.list_host), 1)
         self.refresh()
+
+    # --- ventana angosta -----------------------------------------------------
+    def set_compact(self, compact: bool) -> None:
+        """Con poco ancho: el panel en vivo se apila, el segmento se acorta y los iconos se esconden."""
+        if compact == self._compact:
+            return
+        self._compact = compact
+        transcript_host, notes_host = self._panel_hosts
+        self.panel.removeWidget(transcript_host)
+        self.panel.removeWidget(notes_host)
+        self.panel.addWidget(transcript_host, 0, 0)
+        self.panel.addWidget(notes_host, 1, 0) if compact else self.panel.addWidget(notes_host, 0, 1)
+        self.live_bars.setVisible(not compact)
+        for kind, button in self.source_buttons.items():
+            button.setText(f" {self.source_names[kind][1 if compact else 0]}")
+        for card_widget in self.cards.values():
+            card_widget.set_compact(compact)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.set_compact(self.width() < COMPACT_WIDTH)
 
     # --- reunión en curso ----------------------------------------------------
     def set_live(self, recorder, meeting) -> None:
@@ -936,6 +990,7 @@ class MeetingsPage(QWidget):
                 "Aquí aparecerán tus reuniones. Actívalas en Ajustes › Reuniones."))
         for meeting in meetings:
             card_widget = MeetingCard(meeting, self.ctl)
+            card_widget.set_compact(bool(self._compact))
             self.cards[meeting.id] = card_widget
             self.list_layout.addWidget(card_widget)
         self.list_layout.addStretch(1)
