@@ -1,5 +1,6 @@
 """Ventana principal: Inicio, Historial y Ajustes."""
 import os
+import webbrowser
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,7 @@ from neonwhisper.mictest import MeetingAudioTester, MicTester
 from neonwhisper.paths import DATA_DIR, MODELS_DIR
 from neonwhisper.summarizer import TEMPLATES
 from neonwhisper.ui import theme as T
+from neonwhisper.updater import RELEASES_URL, Updater, can_update
 from neonwhisper.ui.widgets import (
     CardFlow, ClickCard, ElidedLabel, GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot,
     ThemeCard, ToggleSwitch, WaveBars, add_glow, add_shadow, card, glyph_icon, label, make_app_icon, on_restyle,
@@ -1573,7 +1575,55 @@ class SettingsPage(QWidget):
         open_models.clicked.connect(lambda: os.startfile(MODELS_DIR))
         fl.addWidget(open_data)
         fl.addWidget(open_models)
-        self._row(sec, "Carpetas", f"NeonWhisper v{__version__} · todo se guarda en tu PC.", folders, last=True)
+        self._row(sec, "Carpetas", "Todo se guarda en tu PC: nada sale de aquí.", folders, last=True)
+
+        # Actualizaciones
+        sec = self._section(root, T.Glyph.GLOBE, "Actualizaciones")
+        sec.addWidget(label(
+            "NeonWhisper mira la rama «main» del repositorio público y compara el número de "
+            "versión con el tuyo. Si lo que tienes es más nuevo que lo publicado, te dirá que "
+            "estás al día: es lo correcto, aunque de momento pueda sonar raro.", "muted", wrap=True))
+        sec.addSpacing(GAP_S)
+        self.updater = Updater(self)
+        self.updater.checked.connect(self._on_update_checked)
+        self.updater.check_failed.connect(self._on_update_failed)
+        self.updater.launching.connect(self._on_update_launching)
+        self.updater.launch_failed.connect(self._on_update_launch_failed)
+        self.check_btn = icon_button(T.Glyph.RETRY, "Buscar actualizaciones")
+        self.check_btn.clicked.connect(self._check_updates)
+        self._row(sec, "Versión instalada", f"Tienes la v{__version__}.", self.check_btn, last=True)
+
+        update_panel = QWidget()
+        uv = QVBoxLayout(update_panel)
+        uv.setContentsMargins(0, 0, 0, GAP_M)
+        uv.setSpacing(GAP_M)
+        self.update_status = label("", "muted", wrap=True)
+        uv.addWidget(self.update_status)
+        self.update_actions = QWidget()
+        ua = QHBoxLayout(self.update_actions)
+        ua.setContentsMargins(0, 0, 0, 0)
+        ua.setSpacing(GAP_M)
+        # Una copia que no se puede actualizar así (un clon de git, por ejemplo) lo dice desde ya.
+        # El botón se queda, pero sin el relleno primario: apagado, ese relleno lo tapaba y parecía
+        # que sí se podía picar.
+        self._can_update, self._update_reason = can_update()
+        self.install_btn = icon_button(T.Glyph.DOWNLOAD, "Actualizar ahora",
+                                       variant="primary" if self._can_update else None)
+        self.install_btn.setEnabled(self._can_update)
+        if not self._can_update:
+            self.install_btn.setToolTip(self._update_reason)
+        self.install_btn.clicked.connect(self._install_update)
+        changes_btn = icon_button(T.Glyph.GLOBE, "Ver qué cambió", variant="ghost", tooltip=RELEASES_URL)
+        changes_btn.clicked.connect(lambda: webbrowser.open(RELEASES_URL))
+        ua.addWidget(self.install_btn)
+        ua.addWidget(changes_btn)
+        ua.addStretch(1)
+        self.update_actions.hide()
+        uv.addWidget(self.update_actions)
+        sec.addWidget(update_panel)
+        if not self._can_update:
+            self._set_update_status(self._update_reason, "muted")
+
         root.addStretch(1)
 
         outer = QVBoxLayout(self)
@@ -1789,6 +1839,59 @@ class SettingsPage(QWidget):
             h.addWidget(b)
         host._group = group  # mantener referencia viva
         return host
+
+    # --- actualizar la app ---------------------------------------------------
+    def _set_update_status(self, text: str, tone: str) -> None:
+        set_tone(self.update_status, tone)
+        self.update_status.setText(text)
+
+    def _check_updates(self) -> None:
+        if self.updater.busy:
+            return
+        self.check_btn.setEnabled(False)
+        self.update_actions.hide()
+        self._set_update_status("Preguntando a GitHub qué versión hay publicada…", "accent")
+        self.updater.check()
+
+    def _on_update_checked(self, version: str, newer: bool) -> None:
+        self.check_btn.setEnabled(True)
+        if newer:
+            news = f"Hay una versión nueva: v{version}. Tú tienes la v{__version__}."
+            # Si esta copia no se puede actualizar sola, el motivo va aquí: si no, el aviso de
+            # «hay versión nueva» pisaba la explicación y el botón apagado quedaba sin justificar.
+            self._set_update_status(news if self._can_update else f"{news} {self._update_reason}",
+                                    "accent" if self._can_update else "muted")
+            self.update_actions.show()
+        else:
+            self._set_update_status(
+                f"Estás al día: lo publicado es la v{version} y tú tienes la v{__version__}.", "ok")
+            self.update_actions.hide()
+
+    def _on_update_failed(self, reason: str) -> None:
+        self.check_btn.setEnabled(True)
+        self.update_actions.hide()
+        # No es un fallo de la app: casi siempre es que no hay internet. Se dice sin alarmar.
+        self._set_update_status(f"No pude preguntarle a GitHub: {reason}. Inténtalo más tarde.", "muted")
+
+    def _install_update(self) -> None:
+        version = self.updater.latest or "más reciente"
+        if not confirm(self, "Actualizar NeonWhisper",
+                       f"Voy a instalar la v{version}.\n\n"
+                       "NeonWhisper se cerrará para reemplazar sus archivos y se volverá a abrir "
+                       "solo al terminar. Verás una ventana con el progreso. Tus dictados, tus "
+                       "reuniones y tus ajustes no se tocan.",
+                       "Actualizar y reiniciar"):
+            return
+        self.updater.install()
+
+    def _on_update_launching(self) -> None:
+        self.install_btn.setEnabled(False)
+        self.check_btn.setEnabled(False)
+        self._set_update_status("Actualizando… NeonWhisper se va a cerrar y volverá solo.", "accent")
+
+    def _on_update_launch_failed(self, reason: str) -> None:
+        self.install_btn.setEnabled(False)
+        self._set_update_status(f"No se pudo lanzar el actualizador: {reason}", "danger")
 
     # --- captura del atajo -------------------------------------------------
     def _toggle_capture(self) -> None:
