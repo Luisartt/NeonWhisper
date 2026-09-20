@@ -1,2 +1,2 @@
-__version__ = "1.4.0"
+__version__ = "1.9.0"
 APP_NAME = "NeonWhisper"

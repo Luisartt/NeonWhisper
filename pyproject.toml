@@ -10,6 +10,7 @@ dependencies = [
     "tokenizers>=0.15",
     "PySide6-Essentials>=6.7",
     "sounddevice>=0.5",
+    "soundcard>=0.4.4",  # WASAPI loopback: graba lo que suena en la PC
     "numpy>=1.26",
     "keyboard>=0.13.5",
     # Librerías CUDA 12 para correr Whisper en GPU NVIDIA (se ignoran si no hay GPU).

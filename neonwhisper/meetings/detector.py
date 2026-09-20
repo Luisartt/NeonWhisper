@@ -1,13 +1,18 @@
 """Detecta cuándo entras y sales de una reunión, sin instalar nada extra.
 
-Dos señales, ambas nativas de Windows:
+Tres señales, todas nativas de Windows:
 
-1. **El micrófono en uso.** Windows anota en el registro qué app está usando el micrófono
-   (`CapabilityAccessManager\\ConsentStore\\microphone`): mientras lo usa, su `LastUsedTimeStop`
-   vale 0. Es la misma información que muestra el icono del micrófono en la barra de tareas.
-2. **Quién lo está usando.** Si el ejecutable es una app de reuniones (Teams, Zoom, Meet…) o
-   un navegador con una pestaña de videollamada, es una reunión; si es otra cosa (o NeonWhisper
-   dictando), no.
+1. **Quién tiene el micrófono abierto.** Windows lo anota en el registro
+   (`CapabilityAccessManager\\ConsentStore\\microphone`): mientras una app usa el micrófono, su
+   `LastUsedTimeStop` vale 0. Es la misma información del icono del micrófono en la barra de tareas.
+2. **El título de la ventana.** Para el navegador es lo que distingue una videollamada de una pestaña
+   cualquiera: «Meet», «Zoom Meeting», «Microsoft Teams»…
+3. **Cuánta certeza hay.** Zoom, Teams o Meet solo abren el micrófono cuando estás en la llamada: eso
+   se graba sin preguntar. Discord, Slack o el navegador lo tienen abierto por costumbre, así que esos
+   salen como «no seguro» y se avisa con el recuadro flotante en vez de grabar solo.
+
+(Windows no dice si Discord está en llamada o solo tiene el micrófono abierto, así que se pregunta
+en vez de adivinar.)
 
 Para no arrancar y parar con cada microcorte, hay que ver la señal varias veces seguidas:
 dos lecturas para empezar y cinco para terminar (~15 s de silencio).
@@ -41,6 +46,8 @@ MEETING_APPS = {
     "skype.exe": "Skype",
     "whatsapp.exe": "WhatsApp",
 }
+# Estas tienen el micrófono abierto aunque no haya llamada: hace falta oírlas sonar.
+NEEDS_AUDIO = {"discord.exe", "slack.exe", "whatsapp.exe", "skype.exe"}
 # Navegadores: cuentan solo si además hay una ventana de videollamada abierta.
 BROWSERS = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe", "arc.exe"}
 WINDOW_HINTS = (
@@ -57,6 +64,7 @@ class Meeting:
     app: str        # nombre bonito: "Zoom", "Google Meet"…
     process: str    # ejecutable que tiene el micrófono
     title: str      # título de la ventana, si lo hay
+    confident: bool = True  # False = puede no ser reunión; se pregunta antes de grabar
 
 
 # --- Micrófono en uso ---------------------------------------------------------
@@ -116,22 +124,41 @@ def window_titles() -> list[str]:
     return titles
 
 
+def microphone_users(ignore: set[str]) -> list[str]:
+    """Ejecutables que tienen el micrófono abierto ahora mismo."""
+    return sorted(apps_using_microphone() - ignore)
+
+
 def detect(extra_apps: set[str], ignore: set[str]) -> Meeting | None:
-    """Mira el micrófono y las ventanas y dice si estás en una reunión."""
-    using = apps_using_microphone() - ignore
+    """Mira quién tiene el micrófono y las ventanas: ¿estás en una reunión?"""
+    using = microphone_users(ignore)
     if not using:
         return None
     known = {**MEETING_APPS, **{a: a.removesuffix(".exe").title() for a in extra_apps}}
-    for process in using:
+    titles: list[str] | None = None
+
+    def window_hint(app: str) -> str:
+        nonlocal titles
+        if titles is None:
+            titles = window_titles()
+        return next((t for t in titles if app.split()[0].lower() in t.lower()), "")
+
+    for process in using:  # apps que solo se abren para reunirse: se graba sin preguntar
+        if process in known and process not in NEEDS_AUDIO:
+            return Meeting(known[process], process, window_hint(known[process]))
+    for process in using:  # Discord, Slack…: tienen el micrófono abierto sin estar en llamada
         if process in known:
-            title = next((t for t in window_titles() if known[process].split()[0].lower() in t.lower()), "")
-            return Meeting(known[process], process, title)
-    for process in using:
-        if process in BROWSERS:
-            for title in window_titles():
-                for pattern, app in WINDOW_HINTS:
-                    if pattern.search(title):
-                        return Meeting(app, process, title)
+            return Meeting(known[process], process, window_hint(known[process]), confident=False)
+    for process in using:  # navegador: el título dice si hay videollamada
+        if process not in BROWSERS:
+            continue
+        if titles is None:
+            titles = window_titles()
+        for title in titles:
+            for pattern, app in WINDOW_HINTS:
+                if pattern.search(title):
+                    return Meeting(app, process, title)
+        return Meeting("Videollamada", process, "", confident=False)
     return None
 
 
@@ -146,6 +173,7 @@ class MeetingDetector(QObject):
         self.settings = settings
         self.ignore = ignore or set()
         self.current: Meeting | None = None
+        self._dismissed = False  # paraste a mano: no volver a grabar esta misma reunión
         self._hits = 0
         self._misses = 0
         self._timer = QTimer(self, interval=POLL_MS, timeout=self.poll)
@@ -170,20 +198,30 @@ class MeetingDetector(QObject):
         if found:
             self._misses = 0
             self._hits += 1
-            if self.current is None and self._hits >= STARTS_AFTER:
+            if self.current is None and not self._dismissed and self._hits >= STARTS_AFTER:
                 self.current = found
                 log.info("Reunión detectada: %s (%s)", found.app, found.process)
                 self.started.emit(found)
         else:
             self._hits = 0
             self._misses += 1
+            if self._misses >= ENDS_AFTER:
+                self._dismissed = False  # la reunión terminó de verdad: volvemos a vigilar
             if self.current is not None and self._misses >= ENDS_AFTER:
                 log.info("Reunión terminada: %s", self.current.app)
                 self.current = None
                 self.ended.emit()
 
     def forget(self) -> None:
-        """Olvida la reunión en curso (p. ej. si la paras a mano y no quieres que vuelva a empezar)."""
+        """Olvida la reunión en curso (al cerrar la app o apagar la vigilancia)."""
         self.current = None
+        self._dismissed = False
+        self._hits = 0
+        self._misses = 0
+
+    def dismiss(self) -> None:
+        """Paraste la grabación a mano: no se vuelve a grabar hasta que salgas de la reunión."""
+        self.current = None
+        self._dismissed = True
         self._hits = 0
         self._misses = 0

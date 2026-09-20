@@ -1,8 +1,9 @@
 """Graba una reunión a disco: tu micrófono y lo que suena en tu PC, mezclados en un .wav.
 
-El audio del sistema se captura con los dispositivos *loopback* de WASAPI, que Windows
-expone como entradas más (p. ej. «Altavoces (Realtek) [Loopback]»). Si no hay ninguno,
-se graba solo el micrófono y se avisa; la reunión se sigue transcribiendo igual.
+El audio del sistema se captura abriendo el altavoz en modo loopback con WASAPI
+(ver `system_audio.py`), que funciona con cualquier salida. Si eso falla se prueba con un
+dispositivo de entrada «loopback»/«Stereo Mix», y si tampoco hay, se graba solo el micrófono
+y se avisa; la reunión se sigue transcribiendo igual.
 
 Se escribe en el .wav según llega (16 kHz mono, 16 bits: ~2 MB por minuto), así una
 reunión de dos horas no ocupa memoria y sobrevive a que la app se cierre a lo bruto.
@@ -17,6 +18,7 @@ import numpy as np
 import sounddevice as sd
 
 from neonwhisper.audio import SAMPLE_RATE, level_of
+from neonwhisper.meetings.system_audio import open_system_source
 
 log = logging.getLogger(__name__)
 
@@ -58,13 +60,59 @@ def find_loopback_device(output_name: str = "") -> int | None:
     return candidates[0][0]
 
 
-def to_mono_16k(block: np.ndarray, rate: int) -> np.ndarray:
-    """Mezcla los canales y lleva el bloque a 16 kHz."""
-    mono = block.mean(axis=1) if block.ndim > 1 else block
+def open_system_audio(speaker: str = ""):
+    """Lo que suena en la PC: primero WASAPI loopback, si no un dispositivo «loopback»/«Stereo Mix»."""
+    try:
+        return open_system_source(speaker)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("WASAPI loopback no disponible (%s): se busca un dispositivo de entrada", exc)
+    index = find_loopback_device()
+    if index is None:
+        return None
+    source = Source(index, loopback=True)
+    source.start()
+    source.label = device_label(index)
+    return source
+
+
+_FILTERS: dict[int, np.ndarray] = {}
+
+
+def _lowpass(rate: int, taps: int = 101) -> np.ndarray:
+    """Filtro que quita lo que está por encima de 8 kHz antes de bajar a 16 kHz."""
+    if rate not in _FILTERS:
+        n = np.arange(taps) - (taps - 1) / 2
+        h = np.sinc(2 * (0.45 * SAMPLE_RATE) / rate * n) * np.blackman(taps)
+        _FILTERS[rate] = (h / h.sum()).astype(np.float32)
+    return _FILTERS[rate]
+
+
+def to_mono_16k(block: np.ndarray, rate: int, tail: np.ndarray | None = None):
+    """Mezcla los canales y baja el bloque a 16 kHz, sin alias.
+
+    Bajar de 48 kHz a 16 kHz sin filtrar antes pliega todo lo que suena por encima de 8 kHz
+    dentro de la voz: un chasquido de teclado de 15 kHz aparecía como un tono de 1 kHz casi igual
+    de fuerte, justo encima de las frecuencias que Whisper escucha. Con `tail` se guarda el final
+    del bloque anterior para que el filtro no deje un chasquido en cada costura.
+
+    Devuelve el audio, o (audio, nueva_cola) si se pasó `tail`.
+    """
+    mono = (block.mean(axis=1) if block.ndim > 1 else block).astype(np.float32)
+    new_tail = None
     if rate != SAMPLE_RATE:
+        h = _lowpass(rate)
+        if tail is None:
+            mono = np.convolve(mono, h, mode="same")
+        else:
+            padded = np.concatenate([tail, mono])
+            new_tail = padded[-(len(h) - 1):].copy() if len(padded) >= len(h) - 1 else padded.copy()
+            filtered = np.convolve(padded, h, mode="valid")
+            mono = filtered[-len(mono):] if len(filtered) >= len(mono) else filtered
         n = max(1, int(round(len(mono) * SAMPLE_RATE / rate)))
-        mono = np.interp(np.linspace(0, len(mono) - 1, n), np.arange(len(mono)), mono)
-    return mono.astype(np.float32)
+        if len(mono) > 1:
+            mono = np.interp(np.linspace(0, len(mono) - 1, n), np.arange(len(mono)), mono)
+    mono = mono.astype(np.float32)
+    return (mono, new_tail if new_tail is not None else np.zeros(0, dtype=np.float32)) if tail is not None else mono
 
 
 class Source:
@@ -73,6 +121,7 @@ class Source:
     def __init__(self, device: int | None, loopback: bool = False, muted: bool = False):
         self.device = device
         self.loopback = loopback
+        self.label = ""
         self.muted = muted  # silenciada: se sigue leyendo (para no desincronizar) pero no se graba
         self.buffer = np.zeros(0, dtype=np.float32)
         self.level = 0.0
@@ -80,6 +129,7 @@ class Source:
         self._lock = threading.Lock()
         self._stream: sd.InputStream | None = None
         self._rate = SAMPLE_RATE
+        self._tail = np.zeros(0, dtype=np.float32)  # cola del filtro antialias
 
     def start(self) -> None:
         info = sd.query_devices(self.device, "input")
@@ -95,11 +145,16 @@ class Source:
                 self.last_block = time.monotonic()
                 return
             except Exception:  # noqa: BLE001 - el dispositivo no acepta 16 kHz: se usa el suyo
+                if self._stream is not None:  # PortAudio no lo cierra solo
+                    try:
+                        self._stream.close(ignore_errors=True)
+                    except Exception:  # noqa: BLE001
+                        pass
                 self._stream = None
         raise RuntimeError(f"No se pudo abrir el dispositivo {self.device}")
 
     def _callback(self, indata, frames, time_info, status):  # hilo de PortAudio
-        block = to_mono_16k(indata.copy(), self._rate)
+        block, self._tail = to_mono_16k(indata.copy(), self._rate, self._tail)
         with self._lock:
             self.buffer = np.concatenate([self.buffer, block])
         self.level = 0.0 if self.muted else level_of(block)
@@ -137,6 +192,7 @@ class MeetingRecorder:
         self.path: Path | None = None
         self.started_at = 0.0
         self.system_audio = False  # si se está capturando lo que suena en la PC
+        self.system_label = ""     # qué salida se está capturando
         self.level = 0.0
 
     @property
@@ -165,10 +221,25 @@ class MeetingRecorder:
                 source.level = 0.0
             log.info("Reunión: %s %s", kind, "silenciado" if muted else "activo")
 
+    def source_level(self, kind: str) -> float:
+        """Nivel actual de una fuente (0..1): «mic» tu voz, «system» lo que suena en la PC."""
+        source = self._source(kind)
+        return float(getattr(source, "level", 0.0)) if source is not None else 0.0
+
     @property
     def sources(self) -> dict[str, bool]:
-        """Qué fuentes hay y cuáles están grabando ahora mismo."""
-        return {kind: (self._source(kind) is not None and not self.is_muted(kind)) for kind in ("mic", "system")}
+        """Qué fuentes hay, siguen vivas y no están silenciadas."""
+        return {kind: self._is_recording(kind) for kind in ("mic", "system")}
+
+    def _is_recording(self, kind: str) -> bool:
+        source = self._source(kind)
+        return source is not None and getattr(source, "alive", True) and not source.muted
+
+    def describe_short(self) -> str:
+        """Versión corta para el aviso flotante: «micro + sistema»."""
+        names = {"mic": "micro", "system": "sistema"}
+        active = [names[k] for k, on in self.sources.items() if on]
+        return " + ".join(active) if active else "silenciado"
 
     def describe(self) -> str:
         """«tu micrófono + el audio del sistema», «solo tu micrófono»… para avisos y la interfaz."""
@@ -178,36 +249,43 @@ class MeetingRecorder:
             return "nada: las dos fuentes están silenciadas"
         return " + ".join(active) if len(active) > 1 else f"solo {active[0]}"
 
-    def start(self, path: Path, mic: int | None = None, system: bool = True, mic_muted: bool = False) -> None:
+    def start(self, path: Path, mic: int | None = None, system: bool = True, mic_muted: bool = False,
+              speaker: str = "") -> None:
         if self.recording:
             return
-        sources = [Source(mic, muted=mic_muted)]
-        self.system_audio = False
+        microphone = Source(mic, muted=mic_muted)
+        try:
+            microphone.start()
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudo abrir el micrófono %s", mic)
+            raise
+        sources = [microphone]
+        self.system_audio, self.system_label = False, ""
         if system:
-            loopback = find_loopback_device()
-            if loopback is None:
-                log.warning("Sin dispositivo loopback: se grabará solo el micrófono")
-            else:
-                sources.append(Source(loopback, loopback=True))
-                self.system_audio = True
-        for source in sources:
             try:
-                source.start()
+                loopback = open_system_audio(speaker)
             except Exception:  # noqa: BLE001
-                log.exception("No se pudo abrir la fuente %s", source.device)
-                if not source.loopback:
-                    for other in sources:
-                        other.stop()
-                    raise
-                sources.remove(source)
-                self.system_audio = False
-                break
+                log.exception("No se pudo capturar el audio del sistema")
+                loopback = None
+            if loopback is None:
+                log.warning("Sin audio del sistema: se grabará solo el micrófono")
+            else:
+                sources.append(loopback)
+                self.system_audio = True
+                self.system_label = getattr(loopback, "label", "")
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handle = wave.open(str(path), "wb")
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(SAMPLE_RATE)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = wave.open(str(path), "wb")
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(SAMPLE_RATE)
+        except Exception:  # noqa: BLE001 - sin esto el micrófono seguiría grabando sin que nadie lo pare
+            log.exception("No se pudo crear el archivo de la reunión")
+            for source in sources:
+                source.stop()
+            self.system_audio, self.system_label = False, ""
+            raise
         self._sources, self._wave, self.path = sources, handle, path
         self._stop.clear()
         self.started_at = time.monotonic()
@@ -220,6 +298,18 @@ class MeetingRecorder:
             self._flush()
         self._flush(final=True)
 
+    def follow_to(self, device_name: str) -> bool:
+        """Cambia la captura a esa salida (lo pide el controlador, desde el hilo de la interfaz)."""
+        source = self._source("system")
+        if source is None or not device_name or not hasattr(source, "retarget"):
+            return False
+        if device_name == getattr(source, "label", ""):
+            return False
+        if source.retarget(device_name):
+            self.system_label = source.label
+            return True
+        return False
+
     def _flush(self, final: bool = False) -> None:
         sources = list(self._sources)
         if not sources or self._wave is None:
@@ -228,14 +318,21 @@ class MeetingRecorder:
         alive = [s for s in sources if final or now - s.last_block < STARVE_SECONDS]
         if not alive:
             alive = sources
+        for source in sources:
+            if source not in alive:
+                source.take(source.available())  # su audio viejo iría desfasado para siempre
         count = min(s.available() for s in alive) if not final else max(s.available() for s in alive)
         if count <= 0:
             return
         mix = np.zeros(count, dtype=np.float32)
+        grabando = [s for s in alive if not s.muted]
+        # Con dos fuentes fuertes, sumarlas a pelo pasaba de 1.0 y la onda se recortaba: eso es
+        # justo la distorsión que más confunde a Whisper. Se les deja margen antes de sumar.
+        gain = 0.6 if len(grabando) > 1 else 1.0
         for source in alive:
             taken = source.take(count)  # se consume siempre, aunque esté silenciada
             if not source.muted:
-                mix += taken
+                mix += taken * gain
         np.clip(mix, -1.0, 1.0, out=mix)
         self.level = level_of(mix[-1600:]) if len(mix) else 0.0
         try:
@@ -247,11 +344,15 @@ class MeetingRecorder:
         if not self.recording:
             return None, 0.0
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=3)
+        writer, self._thread = self._thread, None
+        if writer is not None:
+            writer.join(timeout=3)
         for source in self._sources:
             source.stop()
-        self._flush(final=True)
+        if writer is not None and writer.is_alive():  # disco lento: mejor perder el último tramo
+            log.warning("El hilo que escribe el audio no terminó a tiempo: no se vuelca el final")
+        else:
+            self._flush(final=True)
         handle, self._wave = self._wave, None
         seconds = 0.0
         if handle is not None:

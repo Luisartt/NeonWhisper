@@ -2,6 +2,8 @@
 import ctypes
 import logging
 import math
+import os
+import re
 import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -19,12 +21,14 @@ from neonwhisper.downloader import DownloadManager
 from neonwhisper.fmt import fmt_eta
 from neonwhisper.history import History
 from neonwhisper.meetings import MeetingDetector, MeetingRecorder, MeetingStore, wav_duration
+from neonwhisper.meetings.system_audio import default_speaker_name
 from neonwhisper.hotkeys import HotkeyManager, is_safe_hotkey
 from neonwhisper.paster import Paster
 from neonwhisper.paths import APP_DIR, LOG_FILE, MEETINGS_DIR, model_downloaded
 from neonwhisper.summarizer import Summarizer
-from neonwhisper.transcriber import Transcriber
+from neonwhisper.transcriber import Transcriber, join_sentences
 from neonwhisper.ui import theme as T
+from neonwhisper.ui.meeting_popup import MeetingPopup
 from neonwhisper.ui.overlay import Overlay
 from neonwhisper.ui.widgets import make_app_icon
 from neonwhisper.ui.window import MainWindow
@@ -32,6 +36,8 @@ from neonwhisper.ui.window import MainWindow
 log = logging.getLogger(APP_NAME)
 MIN_SECONDS = 0.35
 MEETING_CHUNK_SECONDS = 300  # se transcribe la reunión de 5 en 5 minutos, para poder dictar entremedio
+LIVE_CHUNK_SECONDS = 25      # tramo de la transcripción en vivo (mientras la reunión sigue)
+LIVE_MARGIN = 1.5            # no se lee el último tramo del .wav: aún se está escribiendo
 OWN_PROCESSES = {"neonwhisper.exe", "pythonw.exe", "python.exe"}  # no cuentan como "reunión"
 OVERLAY_KEYS = ("overlay_style", "overlay_scale", "overlay_bg_opacity", "overlay_opacity")
 SINGLE_INSTANCE_KEY = "NeonWhisper-single-instance"
@@ -41,7 +47,8 @@ class Controller(QObject):
     request_load = Signal(str, str)
     request_transcribe = Signal(object, str, str)
     request_chunk = Signal(int, int, int, str, float, float, str, str)
-    request_summary = Signal(int, str, str, str)
+    request_summary = Signal(int, str, str, str, str, str)
+    request_ask = Signal(str, str, str, str)
     download_changed = Signal(str)
     download_installed = Signal(str)
 
@@ -63,6 +70,10 @@ class Controller(QObject):
         self.meeting_recorder = MeetingRecorder()
         self.meeting_queue: list[tuple[int, int, int, str, float, float]] = []  # tramos por transcribir
         self.meeting_parts: dict[int, list[str]] = {}
+        self.live_text: list[str] = []      # transcripción en vivo de la reunión en curso
+        self._follow_failed = ""            # salida que no se pudo capturar: no insistir
+        self._live_offset = 0.0             # hasta qué segundo del .wav se ha transcrito en vivo
+        self._live_pending = 0.0            # segundos pedidos y aún sin respuesta
         self.paster = Paster()
         self.model_state = "loading"
         self.model_usable = False
@@ -87,6 +98,9 @@ class Controller(QObject):
         self.summarizer = Summarizer()
         self.summarizer.moveToThread(self.worker_thread)
         self.request_summary.connect(self.summarizer.summarize)
+        self.request_ask.connect(self.summarizer.ask)
+        self.summarizer.answered.connect(self.on_answer)
+        self.summarizer.ask_failed.connect(self.on_answer_failed)
         self.summarizer.progress.connect(self.on_summary_progress)
         self.summarizer.finished.connect(self.on_summarized)
         self.summarizer.failed.connect(self.on_summary_failed)
@@ -99,8 +113,19 @@ class Controller(QObject):
         self.window = MainWindow(self)
         self.overlay = Overlay(lambda: self.recorder.level)
         self.overlay.cancel_requested.connect(self.cancel_recording)
+        self.meeting_popup = MeetingPopup(
+            mic_level=lambda: self.meeting_recorder.source_level("mic"),
+            system_level=lambda: self.meeting_recorder.source_level("system"),
+        )
+        self.meeting_popup.record_requested.connect(self.record_detected_meeting)
+        self.meeting_popup.stop_requested.connect(self.stop_meeting)
+        self.meeting_popup.open_requested.connect(lambda: (self.show_window(), self.window.go_to(2)))
+        self._detected = None  # última reunión detectada (DetectedMeeting)
         self._apply_overlay_look()
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.settings.save)
+        self._live_timer = QTimer(self, interval=4000, timeout=self._live_tick)
+        self._follow_timer = QTimer(self, interval=6000, timeout=self._follow_meeting_audio)
+        self._notes_timer = QTimer(self, singleShot=True, interval=800, timeout=self._save_notes)
 
         self.hotkeys = HotkeyManager()
         try:
@@ -131,7 +156,7 @@ class Controller(QObject):
     def _apply_theme(self) -> None:
         """Aplica el tema guardado a toda la app: hoja de estilos, íconos y la ventana si ya existe."""
         T.set_theme(self.settings.ui_theme)
-        self.app.setStyleSheet(T.build_stylesheet())
+        T.apply_stylesheet(self.app)
         self.icon_idle = make_app_icon(False)
         self.icon_active = make_app_icon(True)
         self.app.setWindowIcon(self.icon_idle)
@@ -140,6 +165,8 @@ class Controller(QObject):
             self.tray.setIcon(self.icon_active if recording else self.icon_idle)
         if getattr(self, "window", None):
             self.window.restyle()
+        if getattr(self, "meeting_popup", None):
+            self.meeting_popup.restyle()
 
     def _sync_overlay_style(self) -> None:
         """Deja la barra flotante con el diseño del mismo nombre que el tema."""
@@ -190,6 +217,10 @@ class Controller(QObject):
 
     def quit(self) -> None:
         self.quitting = True
+        self.meeting_popup.hide()
+        self.detector.set_enabled(False)
+        self._live_timer.stop()
+        self._follow_timer.stop()
         if self._save_timer.isActive():
             self._save_timer.stop()
             self.settings.save()
@@ -395,16 +426,27 @@ class Controller(QObject):
         """El detector dice que entraste a una reunión."""
         if not self.settings.meetings_enabled or self.meeting_recorder.recording:
             return
-        if not self.settings.meeting_auto_start:
+        self._detected = found
+        if self.settings.meeting_auto_start and found.confident:
+            self.start_meeting(found.app, found.title)
+        elif self.settings.meeting_popup:  # dudoso (Discord, una pestaña del navegador…): se pregunta
+            self.meeting_popup.show_prompt(found.app, found.title)
+        else:
             self.tray.showMessage(
                 "NeonWhisper", f"Parece que entraste a una reunión de {found.app}. "
                 "Abre NeonWhisper y dale a «Grabar» si quieres registrarla.", self.icon_idle, 6000)
-            return
-        self.start_meeting(found.app, found.title)
+
+    def record_detected_meeting(self) -> None:
+        """Botón «Grabar» del aviso flotante."""
+        found = self._detected
+        self.start_meeting(found.app if found else "Manual", found.title if found else "")
 
     def on_meeting_ended(self) -> None:
+        self._detected = None
         if self.meeting_recorder.recording:
             self.stop_meeting()
+        elif self.meeting_popup.state == "prompt":
+            self.meeting_popup.fade_out()
 
     def toggle_meeting(self) -> None:
         if self.meeting_recorder.recording:
@@ -423,6 +465,7 @@ class Controller(QObject):
                 mic=resolve_input_device(self.settings.input_device_name, self.settings.input_device),
                 system=self.settings.meeting_capture_system,
                 mic_muted=not self.settings.meeting_record_mic,
+                speaker=self.settings.meeting_speaker,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("No se pudo empezar a grabar la reunión")
@@ -432,35 +475,97 @@ class Controller(QObject):
         self._meeting_id = meeting.id
         detail = self.meeting_recorder.describe()
         log.info("Grabando reunión %s (%s) en %s", meeting.id, detail, path)
+        self.live_text, self._live_offset, self._live_pending = [], 0.0, 0.0
+        if self.settings.meeting_live_transcript:
+            self._live_timer.start()
+        if self.meeting_recorder.system_audio and not self.settings.meeting_speaker:
+            self._follow_timer.start()
         self.tray.showMessage("NeonWhisper", f"Grabando la reunión de {app} ({detail}).", self.icon_active, 4000)
+        if self.settings.meeting_popup:
+            self.meeting_popup.show_recording(app, self.meeting_recorder.describe_short())
         self.window.meetings.refresh()
         self._set_ui_state()
 
     def mute_meeting_source(self, kind: str, muted: bool) -> None:
         """Silencia tu micrófono o el audio del sistema mientras se graba la reunión."""
         self.meeting_recorder.set_muted(kind, muted)
+        if self.meeting_popup.state == "recording":
+            self.meeting_popup.set_sources(self.meeting_recorder.describe_short())
         self._set_ui_state()
 
     def stop_meeting(self) -> None:
         if not self.meeting_recorder.recording:
             return
+        self._live_timer.stop()
+        self._follow_timer.stop()
         meeting_id = self.meeting_id
         path, seconds = self.meeting_recorder.stop()
-        self.detector.forget()
+        self.detector.dismiss()
         self._meeting_id = 0
         log.info("Reunión %s terminada: %.0f s", meeting_id, seconds)
         if seconds < self.settings.meeting_min_seconds:
             self.meetings.delete(meeting_id)
             if path:
                 path.unlink(missing_ok=True)
+            self.meeting_popup.fade_out()
             self._notify(f"Reunión muy corta ({seconds:.0f} s): no se guardó")
             self.window.meetings.refresh()
             self._set_ui_state()
             return
         self.meetings.update(meeting_id, duration=seconds, state="transcribiendo")
+        if self.settings.meeting_popup:
+            self.meeting_popup.show_saved(f"{seconds / 60:.0f} min · transcribiendo…")
         self.window.meetings.refresh()
         self._queue_meeting(meeting_id, str(path), seconds)
         self._set_ui_state()
+
+    def set_meeting_notes(self, text: str) -> None:
+        """Las notas que escribes durante la reunión (se guardan solas, sin pelear con cada tecla)."""
+        self._notes = text
+        self._notes_timer.start()
+
+    def _save_notes(self) -> None:
+        meeting_id = self.meeting_id
+        if meeting_id:
+            self.meetings.update(meeting_id, notes=getattr(self, "_notes", ""))
+
+    def ask_meetings(self, question: str) -> None:
+        """Pregunta sobre tus reuniones, respondida en local con el modelo de resumen."""
+        model = self.settings.meeting_summary_model
+        if not model or not model_downloaded(model):
+            self.window.meetings.show_answer(question, "", "Descarga el modelo de resumen para poder preguntar.")
+            return
+        context = self._ask_context(question)
+        if not context:
+            self.window.meetings.show_answer(question, "", "Todavía no hay reuniones transcritas.")
+            return
+        self.window.meetings.show_answer(question, "", "")  # estado "pensando…"
+        self.request_ask.emit(question, context, model, self.settings.device)
+
+    def _ask_context(self, question: str, meetings: int = 3, chars: int = 4000) -> str:
+        """Las reuniones más relacionadas con la pregunta (y si no, las últimas)."""
+        words = {w for w in re.findall(r"\w{4,}", question.lower())}
+        scored = []
+        for meeting in self.meetings.list(limit=60):
+            text = f"{meeting.summary}\n{meeting.notes}\n{meeting.transcript}".strip()
+            if not text:
+                continue
+            haystack = f"{meeting.label} {text}".lower()
+            score = sum(haystack.count(word) for word in words)
+            scored.append((score, meeting.id, meeting, text))
+        if not scored:
+            return ""
+        scored.sort(key=lambda row: (row[0], row[1]), reverse=True)
+        parts = []
+        for _, _, meeting, text in scored[:meetings]:
+            parts.append(f"### {meeting.label} ({meeting.created_at[:10]})\n{text[:chars]}")
+        return "\n\n".join(parts)
+
+    def on_answer(self, question: str, answer: str) -> None:
+        self.window.meetings.show_answer(question, answer, "")
+
+    def on_answer_failed(self, message: str) -> None:
+        self.window.meetings.show_answer("", "", f"No se pudo responder: {message[:120]}")
 
     def _recover_meetings(self) -> None:
         """Reuniones que quedaron a medias (la app se cerró de golpe): se retoman al arrancar."""
@@ -478,6 +583,7 @@ class Controller(QObject):
                     path.unlink(missing_ok=True)
 
     def _queue_meeting(self, meeting_id: int, path: str, seconds: float) -> None:
+        self.meeting_queue = [c for c in self.meeting_queue if c[0] != meeting_id]  # p. ej. doble clic en Reintentar
         total = max(1, math.ceil(seconds / MEETING_CHUNK_SECONDS))
         self.meeting_parts[meeting_id] = []
         for index in range(total):
@@ -486,6 +592,51 @@ class Controller(QObject):
                 (meeting_id, index + 1, total, path, offset, min(MEETING_CHUNK_SECONDS, seconds - offset))
             )
         self._next_chunk()
+
+    def _follow_meeting_audio(self) -> None:
+        """Sigue la salida PREDETERMINADA de Windows: si la cambias a media reunión, se captura esa.
+
+        No sigue la salida de la app de la reunión (eso requería leer las sesiones de audio por
+        proceso, que es justo lo que tumbaba la app), así que con ruteo por aplicación no aplica.
+        """
+        recorder = self.meeting_recorder
+        if not recorder.recording or not recorder.system_audio:
+            self._follow_timer.stop()
+            return
+        target = default_speaker_name()
+        if not target or target == self._follow_failed:  # ya falló: no volver a colgar la interfaz
+            return
+        if recorder.follow_to(target):
+            self._follow_failed = ""
+            log.info("Reunión: ahora se captura la salida «%s»", target)
+            self.window.meetings.set_live(recorder, self.meetings.get(self.meeting_id))
+        else:
+            self._follow_failed = target
+
+    def _live_tick(self) -> None:
+        """Transcribe el tramo nuevo de la reunión en curso, si no hay algo más urgente en la GPU."""
+        recorder = self.meeting_recorder
+        if not recorder.recording or not self.model_usable or self._live_pending or self.jobs:
+            return
+        if self.meeting_queue or not recorder.path:  # hay una reunión anterior en cola: primero esa
+            return
+        # Contra el .wav, no contra el reloj: si una fuente se queda muda, el archivo va más atrás
+        # que la reunión y pediríamos audio que todavía no existe (y se perdería para siempre).
+        available = wav_duration(recorder.path) - LIVE_MARGIN - self._live_offset
+        if available < LIVE_CHUNK_SECONDS:
+            return
+        self._live_pending = available
+        # index/total = 0 marca "esto es en vivo" (no forma parte de la transcripción final).
+        self.request_chunk.emit(self.meeting_id, 0, 0, str(recorder.path), self._live_offset, available,
+                                self.settings.language, self.settings.initial_prompt)
+
+    def _on_live_chunk(self, meeting_id: int, text: str) -> None:
+        self._live_offset += self._live_pending
+        self._live_pending = 0.0
+        if not text or meeting_id != self.meeting_id:
+            return
+        self.live_text.append(text)
+        self.window.meetings.append_live(text)
 
     def _next_chunk(self) -> None:
         """Pide un tramo cada vez: así un dictado se cuela entre tramo y tramo."""
@@ -496,10 +647,13 @@ class Controller(QObject):
                                 self.settings.language, self.settings.initial_prompt)
 
     def on_meeting_chunk(self, meeting_id: int, index: int, total: int, text: str) -> None:
+        if total == 0:  # tramo de la transcripción en vivo
+            self._on_live_chunk(meeting_id, text)
+            return
         if self.meeting_queue and self.meeting_queue[0][0] == meeting_id and self.meeting_queue[0][1] == index:
             self.meeting_queue.pop(0)
         self.meeting_parts.setdefault(meeting_id, []).append(text)
-        transcript = " ".join(p for p in self.meeting_parts[meeting_id] if p).strip()
+        transcript = join_sentences(p for p in self.meeting_parts[meeting_id] if p)
         self.meetings.update(meeting_id, transcript=transcript)
         self.window.meetings.set_progress(meeting_id, f"Transcribiendo… {index}/{total}")
         if index >= total:
@@ -520,14 +674,18 @@ class Controller(QObject):
         if model and model_downloaded(model):
             self.meetings.update(meeting_id, state="resumiendo")
             self.window.meetings.refresh()
-            self.request_summary.emit(meeting_id, transcript, model, self.settings.device)
+            self.request_summary.emit(meeting_id, transcript, model, self.settings.device,
+                                      (meeting.notes if meeting else ""), self.settings.meeting_template)
         else:
             reason = "" if not model else f"el modelo {model} no está descargado"
             self.meetings.update(meeting_id, state="lista", error=reason)
             self.window.meetings.refresh()
             self._notify_meeting_ready(meeting_id)
 
-    def on_meeting_failed(self, meeting_id: int, message: str) -> None:
+    def on_meeting_failed(self, meeting_id: int, index: int, total: int, message: str) -> None:
+        if total == 0:  # tramo de la transcripción en vivo: se reintenta con el siguiente
+            self._live_pending = 0.0
+            return
         self.meeting_queue = [c for c in self.meeting_queue if c[0] != meeting_id]
         self.meeting_parts.pop(meeting_id, None)
         self.meetings.update(meeting_id, state="error", error=message[:200])
@@ -559,11 +717,21 @@ class Controller(QObject):
         )
 
     def delete_meeting(self, meeting_id: int) -> None:
-        meeting = self.meetings.get(meeting_id)
-        if meeting and meeting.audio_path:
-            Path(meeting.audio_path).unlink(missing_ok=True)
-        self.meetings.delete(meeting_id)
+        self.delete_meetings([meeting_id])
+
+    def delete_meetings(self, ids) -> None:
+        """Borra varias reuniones y el audio que dejan atrás."""
+        # La reunión en curso no se borra ni por descuido: sus archivos están abiertos.
+        ids = [i for i in ids if i != self.meeting_id]
+        if not ids:
+            return
+        for path in self.meetings.delete_many(ids):
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError as exc:  # un .wav bloqueado no debe dejar la lista a medias
+                log.warning("No se pudo borrar %s: %s", path, exc)
         self.window.meetings.refresh()
+        self.window.home.refresh()  # los números de arriba cambian
 
     def retry_meeting(self, meeting_id: int) -> None:
         """Vuelve a intentar: resumir si ya hay transcripción, o transcribir si queda el audio."""
@@ -774,6 +942,13 @@ def sync_launch_at_startup(settings: Settings) -> None:
 
 
 def _setup_logging() -> None:
+    try:  # si el proceso muere por un fallo nativo (COM, drivers…), que quede escrito
+        import faulthandler
+
+        crash = open(LOG_FILE.with_name("crash.log"), "a", buffering=1, encoding="utf-8")
+        faulthandler.enable(file=crash)
+    except Exception:  # noqa: BLE001
+        pass
     handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler])
@@ -799,6 +974,13 @@ def main() -> None:
     if sys.platform == "win32":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Luisart.NeonWhisper")
     app = QApplication(sys.argv)
+    try:
+        # Importarlo aquí, en el hilo principal y con Qt ya arrancado, evita que lo haga un hilo
+        # trabajador: soundcard inicializa COM al importarse y lo suelta en su destructor, y si esas
+        # dos cosas ocurren en hilos distintos, Windows mata el proceso.
+        import soundcard  # noqa: F401
+    except Exception:  # noqa: BLE001 - sin él no hay audio del sistema, pero la app funciona
+        log.exception("No se pudo cargar soundcard")
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
     minimized = "--minimized" in sys.argv
@@ -824,4 +1006,10 @@ def main() -> None:
 
     server.newConnection.connect(on_connection)
     log.info("NeonWhisper iniciado")
-    sys.exit(app.exec())
+    code = app.exec()
+    # Salida inmediata a propósito. Al cerrar, Windows desmonta las librerías de audio (WASAPI/COM,
+    # PortAudio, CUDA) en un orden que a veces revienta el proceso con un error nativo feo, aunque
+    # todo el trabajo ya esté guardado: ajustes, historial y .wav se escriben al momento. Esto se
+    # salta ese desmontaje, así que el usuario nunca ve el aviso de «dejó de funcionar».
+    logging.shutdown()
+    os._exit(code)

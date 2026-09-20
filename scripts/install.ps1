@@ -206,6 +206,16 @@ try {
     Note "La app igual funciona: $exe"
 }
 
+# El inicio con Windows puede haber quedado apuntando a la carpeta anterior: si create_shortcuts
+# no llego a reescribirlo, Windows seguiria abriendo la instalacion vieja en cada arranque.
+try {
+    $current = (Get-ItemProperty -Path $RunKey -Name $AppName -ErrorAction Stop).$AppName
+    if ($current -and $current -notlike "*$Target*") {
+        Set-ItemProperty -Path $RunKey -Name $AppName -Value "`"$exe`" --minimized"
+        Done "Inicio con Windows apuntando a $exe"
+    }
+} catch {}
+
 # Accesos directos viejos que apuntaban a la carpeta anterior.
 if ($previous -and $previous -ne $Target) {
     try {

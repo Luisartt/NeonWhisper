@@ -17,9 +17,39 @@ log = logging.getLogger(__name__)
 
 # Frases que Whisper "alucina" con silencio o ruido.
 _HALLUCINATIONS = re.compile(
-    r"amara\.org|subt[ií]tulos (realizados )?por|thanks? for watching|suscr[ií]bete",
+    r"amara\.org|subt[ií]tulos (realizados )?por|thanks? for watching|suscr[ií]bete"
+    r"|gracias por ver el v[ií]deo|sous-titrage|radio-canada",
     re.IGNORECASE,
 )
+
+
+def _is_noise(text: str, glossary: str = "") -> bool:
+    """Frases que Whisper inventa con silencio, incluido tu propio vocabulario repetido."""
+    if _HALLUCINATIONS.search(text):
+        return True
+    words = [w for w in re.split(r"[\s,;]+", glossary.lower()) if len(w) > 3]
+    if not words:
+        return False
+    said = [w for w in re.split(r"[\s,;.]+", text.lower()) if len(w) > 3]
+    # Con el vocabulario en `hotwords`, sobre silencio el modelo lo escupe tal cual.
+    return bool(said) and sum(1 for w in said if w in words) / len(said) > 0.8
+
+
+def join_sentences(parts) -> str:
+    """Une los trozos cerrando la frase anterior: los cortes caen a media oración."""
+    out: list[str] = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if out:
+            previous = out[-1]
+            if previous and previous[-1] not in ".!?…:;\"')»":
+                out[-1] = previous + "."
+            if part[0].islower():
+                part = part[0].upper() + part[1:]
+        out.append(part)
+    return " ".join(out).strip()
 
 
 def gpu_name() -> str:
@@ -40,7 +70,7 @@ class Transcriber(QObject):
     finished = Signal(str, float, str, float)  # texto, segundos de audio, idioma, segundos de proceso
     failed = Signal(str)
     chunk_done = Signal(int, int, int, str)   # reunión, tramo, total, texto
-    chunk_failed = Signal(int, str)           # reunión, motivo
+    chunk_failed = Signal(int, int, int, str)  # reunión, tramo, total, motivo           # reunión, motivo
 
     def __init__(self):
         super().__init__()
@@ -109,7 +139,7 @@ class Transcriber(QObject):
         from neonwhisper.meetings.recorder import read_wav
 
         if self._model is None:
-            self.chunk_failed.emit(meeting_id, "El modelo todavía no está listo")
+            self.chunk_failed.emit(meeting_id, index, total, "El modelo todavía no está listo")
             return
         try:
             audio = read_wav(Path(path), offset, seconds)
@@ -121,17 +151,21 @@ class Transcriber(QObject):
                 language=None if language == "auto" else language,
                 beam_size=5,
                 vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 700},
-                initial_prompt=prompt.strip() or None,
+                # Un silencio corto troceaba de más y cada trozo se pegaba con el siguiente sin
+                # contexto: con 1 s los cortes caen en pausas de verdad.
+                vad_parameters={"min_silence_duration_ms": 1000},
+                # `hotwords`, no `initial_prompt`: el prompt solo influye en los primeros 30 s, así
+                # que en un tramo de 5 minutos tu vocabulario llegaba al 10 % del audio.
+                hotwords=prompt.strip() or None,
                 condition_on_previous_text=False,
                 without_timestamps=True,
             )
             parts = [seg.text.strip() for seg in segments]
-            text = " ".join(p for p in parts if p and not _HALLUCINATIONS.search(p)).strip()
+            text = join_sentences(p for p in parts if p and not _is_noise(p, prompt))
             self.chunk_done.emit(meeting_id, index, total, text)
         except Exception as exc:  # noqa: BLE001
             log.exception("Error transcribiendo el tramo %s de la reunión %s", index, meeting_id)
-            self.chunk_failed.emit(meeting_id, str(exc))
+            self.chunk_failed.emit(meeting_id, index, total, str(exc))
 
     # --- transcripción ----------------------------------------------------------
     @Slot(object, str, str)
@@ -152,7 +186,7 @@ class Transcriber(QObject):
                 without_timestamps=True,
             )
             parts = [s.text.strip() for s in segments]
-            text = " ".join(p for p in parts if p and not _HALLUCINATIONS.search(p)).strip()
+            text = join_sentences(p for p in parts if p and not _is_noise(p, prompt))
             self.finished.emit(text, len(audio) / 16000, info.language, time.perf_counter() - start)
         except Exception as exc:  # noqa: BLE001
             log.exception("Error transcribiendo")
