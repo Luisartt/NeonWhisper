@@ -144,7 +144,7 @@ _ALIASES = {
 
 
 def set_theme(key: str) -> UITheme:
-    """Cambia la paleta activa. Después hay que volver a aplicar `build_stylesheet()` y repintar la ventana."""
+    """Cambia la paleta activa. Después hay que llamar a `apply_stylesheet()` y repintar la ventana."""
     global THEME
     THEME = THEMES.get(key, THEMES[DEFAULT_THEME])
     globals().update({name: getattr(THEME, field) for name, field in _ALIASES.items()})
