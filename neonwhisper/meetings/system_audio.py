@@ -145,6 +145,26 @@ class SystemAudioSource:
             thread.join(timeout=2)
         self.level = 0.0
 
+    def retarget(self, speaker: str) -> bool:
+        """Cambia a otra salida en caliente (la reunión empezó a sonar por otro dispositivo)."""
+        if not speaker or speaker == self.label:
+            return False
+        muted, previous = self.muted, self.label
+        self.stop()
+        self.speaker, self.muted = speaker, muted
+        try:
+            self.start()
+        except Exception:  # noqa: BLE001 - si la nueva salida falla, se vuelve a la anterior
+            log.exception("No se pudo cambiar la captura a «%s»", speaker)
+            self.speaker = previous
+            try:
+                self.start()
+            except Exception:  # noqa: BLE001
+                log.exception("Tampoco se pudo volver a «%s»", previous)
+            return False
+        log.info("Audio del sistema: ahora se captura «%s»", self.label)
+        return True
+
 
 def open_system_source(speaker: str = "", muted: bool = False) -> SystemAudioSource:
     """Abre la captura del sistema y la devuelve lista; lanza excepción si no se puede."""

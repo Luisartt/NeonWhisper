@@ -104,7 +104,7 @@ class Controller(QObject):
         self.meeting_popup.record_requested.connect(self.record_detected_meeting)
         self.meeting_popup.stop_requested.connect(self.stop_meeting)
         self.meeting_popup.open_requested.connect(lambda: (self.show_window(), self.window.go_to(2)))
-        self._detected: tuple[str, str] | None = None
+        self._detected = None  # última reunión detectada (DetectedMeeting)
         self._apply_overlay_look()
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.settings.save)
 
@@ -404,10 +404,10 @@ class Controller(QObject):
         """El detector dice que entraste a una reunión."""
         if not self.settings.meetings_enabled or self.meeting_recorder.recording:
             return
-        self._detected = (found.app, found.title)
-        if self.settings.meeting_auto_start:
-            self.start_meeting(found.app, found.title)
-        elif self.settings.meeting_popup:
+        self._detected = found
+        if self.settings.meeting_auto_start and found.confident:
+            self.start_meeting(found.app, found.title, found.pid, found.process)
+        elif self.settings.meeting_popup:  # dudoso (Discord, una pestaña del navegador…): se pregunta
             self.meeting_popup.show_prompt(found.app, found.title)
         else:
             self.tray.showMessage(
@@ -416,8 +416,11 @@ class Controller(QObject):
 
     def record_detected_meeting(self) -> None:
         """Botón «Grabar» del aviso flotante."""
-        app, title = self._detected or ("Manual", "")
-        self.start_meeting(app, title)
+        found = self._detected
+        if found is None:
+            self.start_meeting("Manual", "")
+        else:
+            self.start_meeting(found.app, found.title, found.pid, found.process)
 
     def on_meeting_ended(self) -> None:
         self._detected = None
@@ -432,7 +435,7 @@ class Controller(QObject):
         else:
             self.start_meeting("Manual", "")
 
-    def start_meeting(self, app: str, title: str) -> None:
+    def start_meeting(self, app: str, title: str, pid: int = 0, process: str = "") -> None:
         if self.meeting_recorder.recording:
             return
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -444,6 +447,8 @@ class Controller(QObject):
                 system=self.settings.meeting_capture_system,
                 mic_muted=not self.settings.meeting_record_mic,
                 speaker=self.settings.meeting_speaker,
+                follow_pid=pid,
+                follow_process=process,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("No se pudo empezar a grabar la reunión")
