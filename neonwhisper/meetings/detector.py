@@ -2,17 +2,17 @@
 
 Tres señales, todas nativas de Windows:
 
-1. **Quién tiene el micrófono abierto.** Se leen las sesiones de captura de WASAPI
-   (`audio_sessions.capture_sessions`): en cuanto entras a una llamada, Zoom, Teams o Meet abren una.
-   Si COM falla, se usa el registro de Windows como plan B.
+1. **Quién tiene el micrófono abierto.** Windows lo anota en el registro
+   (`CapabilityAccessManager\\ConsentStore\\microphone`): mientras una app usa el micrófono, su
+   `LastUsedTimeStop` vale 0. Es la misma información del icono del micrófono en la barra de tareas.
 2. **El título de la ventana.** Para el navegador es lo que distingue una videollamada de una pestaña
    cualquiera: «Meet», «Zoom Meeting», «Microsoft Teams»…
 3. **Cuánta certeza hay.** Zoom, Teams o Meet solo abren el micrófono cuando estás en la llamada: eso
    se graba sin preguntar. Discord, Slack o el navegador lo tienen abierto por costumbre, así que esos
    salen como «no seguro» y se avisa con el recuadro flotante en vez de grabar solo.
 
-(El medidor de WASAPI da el nivel del dispositivo, no el de cada app, así que no sirve para saber si
-Discord está en llamada; por eso se pregunta en vez de adivinar.)
+(Windows no dice si Discord está en llamada o solo tiene el micrófono abierto, así que se pregunta
+en vez de adivinar.)
 
 Para no arrancar y parar con cada microcorte, hay que ver la señal varias veces seguidas:
 dos lecturas para empezar y cinco para terminar (~15 s de silencio).
@@ -24,8 +24,6 @@ import sys
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QTimer, Signal
-
-from neonwhisper.meetings.audio_sessions import capture_sessions
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +64,6 @@ class Meeting:
     app: str        # nombre bonito: "Zoom", "Google Meet"…
     process: str    # ejecutable que tiene el micrófono
     title: str      # título de la ventana, si lo hay
-    pid: int = 0    # proceso concreto, para seguir por qué salida suena
     confident: bool = True  # False = puede no ser reunión; se pregunta antes de grabar
 
 
@@ -127,12 +124,9 @@ def window_titles() -> list[str]:
     return titles
 
 
-def microphone_users(ignore: set[str]) -> list[tuple[str, int]]:
-    """(ejecutable, pid) de lo que tiene el micrófono abierto. Con el registro como plan B."""
-    sessions = capture_sessions()
-    if sessions:
-        return [(s.process, s.pid) for s in sessions if s.process not in ignore]
-    return [(name, 0) for name in apps_using_microphone() - ignore]
+def microphone_users(ignore: set[str]) -> list[str]:
+    """Ejecutables que tienen el micrófono abierto ahora mismo."""
+    return sorted(apps_using_microphone() - ignore)
 
 
 def detect(extra_apps: set[str], ignore: set[str]) -> Meeting | None:
@@ -149,13 +143,13 @@ def detect(extra_apps: set[str], ignore: set[str]) -> Meeting | None:
             titles = window_titles()
         return next((t for t in titles if app.split()[0].lower() in t.lower()), "")
 
-    for process, pid in using:  # apps que solo se abren para reunirse
+    for process in using:  # apps que solo se abren para reunirse: se graba sin preguntar
         if process in known and process not in NEEDS_AUDIO:
-            return Meeting(known[process], process, window_hint(known[process]), pid)
-    for process, pid in using:  # Discord, Slack…: tienen el micrófono abierto sin estar en llamada
+            return Meeting(known[process], process, window_hint(known[process]))
+    for process in using:  # Discord, Slack…: tienen el micrófono abierto sin estar en llamada
         if process in known:
-            return Meeting(known[process], process, window_hint(known[process]), pid, confident=False)
-    for process, pid in using:  # navegador: título de videollamada, o audio saliendo de esa pestaña
+            return Meeting(known[process], process, window_hint(known[process]), confident=False)
+    for process in using:  # navegador: el título dice si hay videollamada
         if process not in BROWSERS:
             continue
         if titles is None:
@@ -163,8 +157,8 @@ def detect(extra_apps: set[str], ignore: set[str]) -> Meeting | None:
         for title in titles:
             for pattern, app in WINDOW_HINTS:
                 if pattern.search(title):
-                    return Meeting(app, process, title, pid)
-        return Meeting("Videollamada", process, "", pid, confident=False)
+                    return Meeting(app, process, title)
+        return Meeting("Videollamada", process, "", confident=False)
     return None
 
 

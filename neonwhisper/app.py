@@ -20,6 +20,7 @@ from neonwhisper.downloader import DownloadManager
 from neonwhisper.fmt import fmt_eta
 from neonwhisper.history import History
 from neonwhisper.meetings import MeetingDetector, MeetingRecorder, MeetingStore, wav_duration
+from neonwhisper.meetings.system_audio import default_speaker_name
 from neonwhisper.hotkeys import HotkeyManager, is_safe_hotkey
 from neonwhisper.paster import Paster
 from neonwhisper.paths import APP_DIR, LOG_FILE, MEETINGS_DIR, model_downloaded
@@ -110,7 +111,10 @@ class Controller(QObject):
         self.window = MainWindow(self)
         self.overlay = Overlay(lambda: self.recorder.level)
         self.overlay.cancel_requested.connect(self.cancel_recording)
-        self.meeting_popup = MeetingPopup()
+        self.meeting_popup = MeetingPopup(
+            mic_level=lambda: self.meeting_recorder.source_level("mic"),
+            system_level=lambda: self.meeting_recorder.source_level("system"),
+        )
         self.meeting_popup.record_requested.connect(self.record_detected_meeting)
         self.meeting_popup.stop_requested.connect(self.stop_meeting)
         self.meeting_popup.open_requested.connect(lambda: (self.show_window(), self.window.go_to(2)))
@@ -118,6 +122,7 @@ class Controller(QObject):
         self._apply_overlay_look()
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.settings.save)
         self._live_timer = QTimer(self, interval=4000, timeout=self._live_tick)
+        self._follow_timer = QTimer(self, interval=6000, timeout=self._follow_meeting_audio)
         self._notes_timer = QTimer(self, singleShot=True, interval=800, timeout=self._save_notes)
 
         self.hotkeys = HotkeyManager()
@@ -211,6 +216,9 @@ class Controller(QObject):
     def quit(self) -> None:
         self.quitting = True
         self.meeting_popup.hide()
+        self.detector.set_enabled(False)
+        self._live_timer.stop()
+        self._follow_timer.stop()
         if self._save_timer.isActive():
             self._save_timer.stop()
             self.settings.save()
@@ -418,7 +426,7 @@ class Controller(QObject):
             return
         self._detected = found
         if self.settings.meeting_auto_start and found.confident:
-            self.start_meeting(found.app, found.title, found.pid, found.process)
+            self.start_meeting(found.app, found.title)
         elif self.settings.meeting_popup:  # dudoso (Discord, una pestaña del navegador…): se pregunta
             self.meeting_popup.show_prompt(found.app, found.title)
         else:
@@ -429,10 +437,7 @@ class Controller(QObject):
     def record_detected_meeting(self) -> None:
         """Botón «Grabar» del aviso flotante."""
         found = self._detected
-        if found is None:
-            self.start_meeting("Manual", "")
-        else:
-            self.start_meeting(found.app, found.title, found.pid, found.process)
+        self.start_meeting(found.app if found else "Manual", found.title if found else "")
 
     def on_meeting_ended(self) -> None:
         self._detected = None
@@ -447,7 +452,7 @@ class Controller(QObject):
         else:
             self.start_meeting("Manual", "")
 
-    def start_meeting(self, app: str, title: str, pid: int = 0, process: str = "") -> None:
+    def start_meeting(self, app: str, title: str) -> None:
         if self.meeting_recorder.recording:
             return
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -459,8 +464,6 @@ class Controller(QObject):
                 system=self.settings.meeting_capture_system,
                 mic_muted=not self.settings.meeting_record_mic,
                 speaker=self.settings.meeting_speaker,
-                follow_pid=pid,
-                follow_process=process,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("No se pudo empezar a grabar la reunión")
@@ -473,6 +476,8 @@ class Controller(QObject):
         self.live_text, self._live_offset, self._live_pending = [], 0.0, 0.0
         if self.settings.meeting_live_transcript:
             self._live_timer.start()
+        if self.meeting_recorder.system_audio and not self.settings.meeting_speaker:
+            self._follow_timer.start()
         self.tray.showMessage("NeonWhisper", f"Grabando la reunión de {app} ({detail}).", self.icon_active, 4000)
         if self.settings.meeting_popup:
             self.meeting_popup.show_recording(app, self.meeting_recorder.describe_short())
@@ -488,6 +493,7 @@ class Controller(QObject):
         if not self.meeting_recorder.recording:
             return
         self._live_timer.stop()
+        self._follow_timer.stop()
         meeting_id = self.meeting_id
         path, seconds = self.meeting_recorder.stop()
         self.detector.forget()
@@ -581,6 +587,17 @@ class Controller(QObject):
                 (meeting_id, index + 1, total, path, offset, min(MEETING_CHUNK_SECONDS, seconds - offset))
             )
         self._next_chunk()
+
+    def _follow_meeting_audio(self) -> None:
+        """Si cambias de salida a media reunión (te pones los audífonos), se captura la nueva."""
+        recorder = self.meeting_recorder
+        if not recorder.recording or not recorder.system_audio:
+            self._follow_timer.stop()
+            return
+        target = default_speaker_name()
+        if target and recorder.follow_to(target):
+            log.info("Reunión: ahora se captura la salida «%s»", target)
+            self.window.meetings.set_live(recorder, self.meetings.get(self.meeting_id))
 
     def _live_tick(self) -> None:
         """Transcribe el tramo nuevo de la reunión en curso, si no hay algo más urgente en la GPU."""
@@ -900,6 +917,13 @@ def sync_launch_at_startup(settings: Settings) -> None:
 
 
 def _setup_logging() -> None:
+    try:  # si el proceso muere por un fallo nativo (COM, drivers…), que quede escrito
+        import faulthandler
+
+        crash = open(LOG_FILE.with_name("crash.log"), "a", buffering=1, encoding="utf-8")
+        faulthandler.enable(file=crash)
+    except Exception:  # noqa: BLE001
+        pass
     handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler])

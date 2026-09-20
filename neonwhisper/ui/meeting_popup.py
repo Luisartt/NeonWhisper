@@ -57,7 +57,9 @@ class MeetingPopup(QWidget):
     open_requested = Signal()
     dismissed = Signal()
 
-    def __init__(self):
+    def __init__(self, mic_level=None, system_level=None):
+        self.mic_level = mic_level or (lambda: 0.0)
+        self.system_level = system_level or (lambda: 0.0)
         super().__init__(
             None,
             Qt.WindowType.FramelessWindowHint

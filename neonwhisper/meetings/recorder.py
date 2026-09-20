@@ -18,13 +18,11 @@ import numpy as np
 import sounddevice as sd
 
 from neonwhisper.audio import SAMPLE_RATE, level_of
-from neonwhisper.meetings.audio_sessions import output_device_for
 from neonwhisper.meetings.system_audio import open_system_source
 
 log = logging.getLogger(__name__)
 
 BLOCK_SECONDS = 0.1
-FOLLOW_SECONDS = 6.0  # cada cuánto se revisa por qué salida está sonando la reunión
 FLUSH_SECONDS = 0.5
 STARVE_SECONDS = 2.0  # si una fuente se queda muda tanto tiempo, se escribe la otra sola
 
@@ -158,8 +156,6 @@ class MeetingRecorder:
         self.started_at = 0.0
         self.system_audio = False  # si se está capturando lo que suena en la PC
         self.system_label = ""     # qué salida se está capturando
-        self._follow: tuple[set[int], set[str]] = (set(), set())
-        self._followed = 0.0
         self.level = 0.0
 
     @property
@@ -188,6 +184,11 @@ class MeetingRecorder:
                 source.level = 0.0
             log.info("Reunión: %s %s", kind, "silenciado" if muted else "activo")
 
+    def source_level(self, kind: str) -> float:
+        """Nivel actual de una fuente (0..1): «mic» tu voz, «system» lo que suena en la PC."""
+        source = self._source(kind)
+        return float(getattr(source, "level", 0.0)) if source is not None else 0.0
+
     @property
     def sources(self) -> dict[str, bool]:
         """Qué fuentes hay y cuáles están grabando ahora mismo."""
@@ -208,7 +209,7 @@ class MeetingRecorder:
         return " + ".join(active) if len(active) > 1 else f"solo {active[0]}"
 
     def start(self, path: Path, mic: int | None = None, system: bool = True, mic_muted: bool = False,
-              speaker: str = "", follow_pid: int = 0, follow_process: str = "") -> None:
+              speaker: str = "") -> None:
         if self.recording:
             return
         microphone = Source(mic, muted=mic_muted)
@@ -219,12 +220,6 @@ class MeetingRecorder:
             raise
         sources = [microphone]
         self.system_audio, self.system_label = False, ""
-        # Sin salida fija, se captura por donde esté sonando la reunión (y se sigue si cambia).
-        self._follow = ({follow_pid} if follow_pid else set(), {follow_process} if follow_process else set())
-        if system and not speaker and any(self._follow):
-            playing = self._where_is_the_meeting()
-            if playing:
-                speaker = playing
         if system:
             try:
                 loopback = open_system_audio(speaker)
@@ -253,33 +248,19 @@ class MeetingRecorder:
         while not self._stop.is_set():
             time.sleep(FLUSH_SECONDS)
             self._flush()
-            self._follow_device()
         self._flush(final=True)
 
-    def _where_is_the_meeting(self) -> str:
-        """Nombre de la salida por la que está sonando la app de la reunión, si se sabe."""
-        pids, names = self._follow
-        if not pids and not names:
-            return ""
-        try:
-            session = output_device_for(pids, names)
-        except Exception:  # noqa: BLE001 - nunca romper la grabación por esto
-            log.exception("No se pudo ver por dónde suena la reunión")
-            return ""
-        return session.device_name if session else ""
-
-    def _follow_device(self) -> None:
-        """Si la reunión pasó a sonar por otra salida (audífonos, HDMI…), se captura esa."""
+    def follow_to(self, device_name: str) -> bool:
+        """Cambia la captura a esa salida (lo pide el controlador, desde el hilo de la interfaz)."""
         source = self._source("system")
-        if source is None or not hasattr(source, "retarget"):
-            return
-        now = time.monotonic()
-        if now - self._followed < FOLLOW_SECONDS:
-            return
-        self._followed = now
-        target = self._where_is_the_meeting()
-        if target and target != source.label and source.retarget(target):
+        if source is None or not device_name or not hasattr(source, "retarget"):
+            return False
+        if device_name == getattr(source, "label", ""):
+            return False
+        if source.retarget(device_name):
             self.system_label = source.label
+            return True
+        return False
 
     def _flush(self, final: bool = False) -> None:
         sources = list(self._sources)

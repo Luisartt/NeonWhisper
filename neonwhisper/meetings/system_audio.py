@@ -102,11 +102,15 @@ class SystemAudioSource:
         self.last_block = time.monotonic()
 
     def _run(self) -> None:
+        com = False
         try:
             import ctypes
 
-            ctypes.windll.ole32.CoInitializeEx(None, 0x2)  # WASAPI necesita COM en cada hilo
-        except Exception:  # noqa: BLE001 - en otros sistemas no hace falta
+            # COM se inicializa aquí, en modo STA, por dos razones: WASAPI lo necesita en cada hilo,
+            # y así `soundcard` ve que el hilo ya tiene otro modelo y no intenta administrarlo él
+            # (si lo administra, suelta COM desde el hilo equivocado y Windows mata el proceso).
+            com = ctypes.windll.ole32.CoInitializeEx(None, 0x2) == 0
+        except Exception:  # noqa: BLE001 - fuera de Windows no hace falta
             pass
         try:
             mic, self.label = _loopback_for(self.speaker)
@@ -126,6 +130,13 @@ class SystemAudioSource:
             log.exception("Falló la captura del audio del sistema")
         finally:
             self._ready.set()  # que start() no se quede esperando si falló al abrir
+            if com:
+                try:
+                    import ctypes
+
+                    ctypes.windll.ole32.CoUninitialize()
+                except Exception:  # noqa: BLE001
+                    log.exception("No se pudo soltar COM del hilo de captura")
 
     def take(self, count: int) -> np.ndarray:
         with self._lock:
