@@ -26,13 +26,10 @@ def _soundcard():
     """Se importa tarde: solo hace falta al grabar una reunión."""
     import soundcard
 
-    # `soundcard` crea un objeto COM de módulo cuyo destructor llama `CoUninitialize()`, y Python
-    # puede ejecutar ese destructor en cualquier hilo: soltar COM desde un hilo que no lo inicializó
-    # mata el proceso. Como cada hilo de aquí administra su propio COM, se lo quitamos de encima.
-    try:
-        soundcard.mediafoundation._com.com_loaded = False
-    except Exception:  # noqa: BLE001 - fuera de Windows, o si cambia la librería
-        log.debug("No se pudo ajustar la gestión de COM de soundcard")
+    # No se toca su gestión de COM: `soundcard` inicializa COM al importarse y lo suelta en su
+    # destructor, y ese par tiene que quedar en el MISMO hilo. Por eso la app lo importa temprano
+    # desde el hilo principal (ver `app.main`), donde sounddevice y Qt ya dejaron el hilo en STA:
+    # así `soundcard` ve otro modelo, no administra COM y no hay nada que soltar al cerrar.
     return soundcard
 
 

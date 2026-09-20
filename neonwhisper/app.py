@@ -963,6 +963,13 @@ def main() -> None:
     if sys.platform == "win32":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Luisart.NeonWhisper")
     app = QApplication(sys.argv)
+    try:
+        # Importarlo aquí, en el hilo principal y con Qt ya arrancado, evita que lo haga un hilo
+        # trabajador: soundcard inicializa COM al importarse y lo suelta en su destructor, y si esas
+        # dos cosas ocurren en hilos distintos, Windows mata el proceso.
+        import soundcard  # noqa: F401
+    except Exception:  # noqa: BLE001 - sin él no hay audio del sistema, pero la app funciona
+        log.exception("No se pudo cargar soundcard")
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
     minimized = "--minimized" in sys.argv

@@ -1,27 +1,39 @@
 """Aviso flotante arriba a la izquierda: «parece que entraste a una reunión, ¿la grabo?».
 
-Es pequeño a propósito: solo el nombre de la reunión y un botón. No roba el foco (puedes seguir
-escribiendo en Teams o Zoom mientras aparece) y se puede arrastrar a otro lado con el ratón.
+Es pequeño a propósito: el nombre de la reunión, un botón y, mientras graba, el cronómetro y dos
+medidores que prueban que sí está entrando el audio. No roba el foco (puedes seguir escribiendo en
+Teams o Zoom mientras aparece) y se puede arrastrar a otro lado con el ratón.
+
+Las medidas están fijas y comentadas porque el aviso no tiene margen de error: es una tarjeta de
+400 px donde el texto largo tiene que elidirse, nunca salirse.
 """
 import ctypes
 import math
 import time
 
 from PySide6.QtCore import QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from neonwhisper.ui import theme as T
-from neonwhisper.ui.widgets import glyph_pixmap
+from neonwhisper.ui.widgets import ElidedLabel, glyph_pixmap
 
 GWL_EXSTYLE = -20
 WS_EX_NOACTIVATE = 0x08000000
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_TOPMOST = 0x00000008
 
-MARGIN = 14          # espacio para la sombra alrededor de la tarjeta
+MARGIN = 16          # espacio para la sombra alrededor de la tarjeta
+CARD_W = 400         # ancho de la tarjeta
+CARD_H = 76          # alto con una línea de título y otra de detalle
+CARD_H_REC = 108     # alto mientras graba: cabe además la sonda de sonido
+RADIUS = 18
+PAD_V = 20           # relleno arriba y abajo de la tarjeta
+DOT_X = 24           # centro del punto de estado, medido desde el borde de la tarjeta
+TEXT_LEFT = 44       # donde empieza el texto: deja libre el halo del punto
 SCREEN_GAP = 24      # separación con la esquina de la pantalla
 PROMPT_SECONDS = 40  # si no le haces caso, el aviso se va solo
+QUIET_SECONDS = 4.0  # sin audio del sistema por más tiempo = aviso de «sin audio de la PC»
 
 
 class _CloseButton(QLabel):
@@ -29,15 +41,15 @@ class _CloseButton(QLabel):
 
     def __init__(self):
         super().__init__()
-        self.setFixedSize(22, 22)
+        self.setFixedSize(26, 26)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.setToolTip("Ocultar este aviso")
         self.restyle(False)
 
     def restyle(self, hover: bool) -> None:
-        self.setPixmap(glyph_pixmap(T.Glyph.CANCEL, T.ICE if hover else T.DIM, 11))
-        self.setStyleSheet(f"border-radius: 11px; background: {T.rgba(T.CYAN, 0.14) if hover else 'transparent'};")
+        self.setPixmap(glyph_pixmap(T.Glyph.CANCEL, T.ICE if hover else T.MUTED, 12))
+        self.setStyleSheet(f"border-radius: 13px; background: {T.rgba(T.CYAN, 0.14) if hover else 'transparent'};")
 
     def enterEvent(self, _):
         self.restyle(True)
@@ -47,6 +59,71 @@ class _CloseButton(QLabel):
 
     def mouseReleaseEvent(self, _):
         self.clicked.emit()
+
+
+class _SoundProbe(QWidget):
+    """Dos medidores: «Tú» (micrófono) y «Los demás» (lo que suena en la PC).
+
+    Sirve para contestar de un vistazo la pregunta de siempre: ¿de verdad está grabando? Si el
+    audio del sistema lleva unos segundos en cero, su barra se pone gris y el aviso lo dice.
+    """
+
+    LABEL_W = 62
+    BAR_W = 120
+    BAR_H = 4
+    ROW_H = 12
+
+    def __init__(self, mic_level, system_level):
+        super().__init__()
+        self.mic_level, self.system_level = mic_level, system_level
+        self._mic = 0.0
+        self._sys = 0.0
+        self._sound_since = 0.0  # última vez que se oyó algo del sistema
+        self.setFixedHeight(2 * self.ROW_H + 4)
+        self._timer = QTimer(self, interval=50, timeout=self._tick)  # 20 fps
+
+    def start(self) -> None:
+        self._mic = self._sys = 0.0
+        self._sound_since = time.monotonic()
+        self._timer.start()
+
+    def stop(self) -> None:
+        self._timer.stop()
+
+    @property
+    def system_quiet(self) -> bool:
+        return time.monotonic() - self._sound_since > QUIET_SECONDS
+
+    def _tick(self) -> None:
+        mic, system = float(self.mic_level()), float(self.system_level())
+        # Suavizado: los niveles brincan mucho y la barra tiene que leerse, no parpadear.
+        self._mic = self._mic * 0.8 + mic * 0.2
+        self._sys = self._sys * 0.8 + system * 0.2
+        if system > 0.02:
+            self._sound_since = time.monotonic()
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        font = T.display_font(7.5)
+        p.setFont(font)
+        quiet = self.system_quiet
+        rows = (("Tú", self._mic, T.CYAN, False), ("Los demás", self._sys, T.BLUE, quiet))
+        for i, (name, value, color, off) in enumerate(rows):
+            y = i * (self.ROW_H + 4)
+            p.setPen(QColor(T.DIM if off else T.MUTED))
+            p.drawText(QRectF(0, y, self.LABEL_W - 8, self.ROW_H),
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, name)
+            track = QRectF(self.LABEL_W, y + (self.ROW_H - self.BAR_H) / 2, self.BAR_W, self.BAR_H)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(T.BG3))
+            p.drawRoundedRect(track, 2, 2)
+            if not off:
+                filled = QRectF(track)
+                filled.setWidth(max(self.BAR_H, track.width() * min(1.0, value)))
+                p.setBrush(QColor(color))
+                p.drawRoundedRect(filled, 2, 2)
 
 
 class MeetingPopup(QWidget):
@@ -69,7 +146,7 @@ class MeetingPopup(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setFixedSize(312 + 2 * MARGIN, 60 + 2 * MARGIN)
+        self.setFixedSize(CARD_W + 2 * MARGIN, CARD_H + 2 * MARGIN)
         self.state = "prompt"
         self._started = 0.0
         self._sources = ""
@@ -77,47 +154,57 @@ class MeetingPopup(QWidget):
         self._moved = False
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(MARGIN + 16, MARGIN, MARGIN + 8, MARGIN)
-        row.setSpacing(10)
+        row.setContentsMargins(MARGIN + TEXT_LEFT, MARGIN + PAD_V, MARGIN + 12, MARGIN + PAD_V)
+        row.setSpacing(12)
         texts = QVBoxLayout()
-        texts.setSpacing(1)
-        self.title = QLabel("Reunión detectada")
-        self.title.setFont(T.display_font(10.5))
-        self.detail = QLabel()
-        self.detail.setFont(T.display_font(8.5, QFont.Weight.Normal))
+        texts.setSpacing(3)
+        self.title = ElidedLabel("Reunión detectada")
+        self.title.setFixedHeight(17)
+        self.detail = ElidedLabel()
+        self.detail.setFixedHeight(16)
+        self.probe = _SoundProbe(self.mic_level, self.system_level)
+        self.probe.hide()
         texts.addWidget(self.title)
         texts.addWidget(self.detail)
+        texts.addSpacing(4)
+        texts.addWidget(self.probe)
+        texts.addStretch(1)
         row.addLayout(texts, 1)
         self.action = QPushButton("Grabar")
         self.action.setProperty("variant", "primary")
         self.action.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.action.setFixedHeight(30)
+        self.action.setFixedHeight(32)
+        self.action.setMinimumWidth(92)
         self.action.clicked.connect(self._on_action)
-        row.addWidget(self.action)
+        row.addWidget(self.action, 0, Qt.AlignmentFlag.AlignVCenter)
         self.close_btn = _CloseButton()
         self.close_btn.clicked.connect(self._on_dismiss)
-        row.addWidget(self.close_btn, 0, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(self.close_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self._fade = QPropertyAnimation(self, b"windowOpacity", self, duration=160)
         self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._fade.finished.connect(lambda: self.hide() if self.windowOpacity() <= 0.01 else None)
         self._auto_hide = QTimer(self, singleShot=True, timeout=self.fade_out)
         self._clock = QTimer(self, interval=500, timeout=self._tick)
-        self._pulse = QTimer(self, interval=60, timeout=self.update)  # latido del punto rojo
+        self._pulse = QTimer(self, interval=60, timeout=self.update)  # respiración del punto
 
     # --- estados --------------------------------------------------------------
     def show_prompt(self, app: str, title: str = "") -> None:
         self.state = "prompt"
         self._clock.stop()
         self._pulse.stop()
+        self.probe.stop()
+        self.probe.hide()
+        self._resize_card()
         self.title.setText(f"Reunión de {app}" if app and app != "Manual" else "Reunión detectada")
-        self.detail.setText((title or "¿La grabo y la transcribo?")[:46])
+        self.detail.setText(title or "¿La grabo y la transcribo?")
         self.action.setText("Grabar")
         self.action.setProperty("variant", "primary")
         self._appear()
         self._auto_hide.start(PROMPT_SECONDS * 1000)
 
     def show_recording(self, app: str, sources: str = "") -> None:
+        """La grabación se queda aquí: cronómetro, sonda de sonido y botón de detener."""
         self.state = "recording"
         self._sources = sources
         self._started = time.monotonic()
@@ -125,6 +212,9 @@ class MeetingPopup(QWidget):
         self.title.setText(f"Grabando {app}" if app and app != "Manual" else "Grabando la reunión")
         self.action.setText("Detener")
         self.action.setProperty("variant", None)
+        self.probe.show()
+        self.probe.start()
+        self._resize_card()
         self._tick()
         self._clock.start()
         self._pulse.start()
@@ -134,8 +224,11 @@ class MeetingPopup(QWidget):
         self.state = "saved"
         self._clock.stop()
         self._pulse.stop()
+        self.probe.stop()
+        self.probe.hide()
+        self._resize_card()
         self.title.setText("Listo")
-        self.detail.setText(text[:46])
+        self.detail.setText(text)
         self.action.setText("Ver")
         self.action.setProperty("variant", None)
         self._appear()
@@ -147,10 +240,20 @@ class MeetingPopup(QWidget):
         if self.state == "recording":
             self._tick()
 
+    def _resize_card(self) -> None:
+        """Mientras graba, la tarjeta crece lo justo para la sonda de sonido."""
+        height = CARD_H_REC if self.state == "recording" else CARD_H
+        self.setFixedSize(CARD_W + 2 * MARGIN, height + 2 * MARGIN)
+
     def _tick(self) -> None:
         secs = int(time.monotonic() - self._started)
         clock = f"{secs // 60}:{secs % 60:02d}"
-        self.detail.setText(f"{clock} · {self._sources}" if self._sources else clock)
+        quiet = self.probe.system_quiet and "sistema" in self._sources
+        if quiet:
+            self.detail.setText(f"{clock} · sin audio de la PC")
+        else:
+            self.detail.setText(f"{clock} · {self._sources}" if self._sources else clock)
+        self._paint_detail(quiet)
 
     def _on_action(self) -> None:
         if self.state == "recording":
@@ -167,16 +270,23 @@ class MeetingPopup(QWidget):
 
     # --- apariencia y posición -------------------------------------------------
     def restyle(self) -> None:
-        self.title.setStyleSheet(f"color: {T.TEXT};")
-        self.detail.setStyleSheet(f"color: {T.MUTED};")
+        # La hoja de estilos de la app pisa cualquier setFont(): el tamaño va en la del widget.
+        self.title.setStyleSheet(
+            f"color: {T.TEXT}; font-family: {T.FONT_UI}; font-size: 12pt; font-weight: 600;")
+        self._paint_detail(self.state == "recording" and self.probe.system_quiet)
         self.close_btn.restyle(False)
         for w in (self.action,):
             w.style().unpolish(w)
             w.style().polish(w)
         self.update()
 
+    def _paint_detail(self, warn: bool) -> None:
+        color = T.REC_INK if warn else T.MUTED
+        self.detail.setStyleSheet(
+            f"color: {color}; font-family: {T.FONT_UI}; font-size: 9.5pt; font-weight: 400;")
+
     def _accent(self) -> str:
-        return {"recording": T.DANGER, "saved": T.OK}.get(self.state, T.CYAN)
+        return {"recording": T.REC, "saved": T.OK}.get(self.state, T.CYAN)
 
     def _appear(self) -> None:
         self.restyle()
@@ -198,6 +308,7 @@ class MeetingPopup(QWidget):
         self._auto_hide.stop()
         self._clock.stop()
         self._pulse.stop()
+        self.probe.stop()
         if not self.isVisible():
             return
         self._fade.stop()
@@ -235,23 +346,31 @@ class MeetingPopup(QWidget):
         card = QRectF(MARGIN, MARGIN, self.width() - 2 * MARGIN, self.height() - 2 * MARGIN)
         accent = self._accent()
 
-        for i in range(MARGIN, 0, -2):  # sombra suave, para que se vea sobre cualquier fondo
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(T.qc("#000000", 0.05 * (1 - i / MARGIN)))
-            p.drawRoundedRect(card.adjusted(-i, -i, i, i), 14 + i, 14 + i)
+        # Sombra suave y un poco caída, para que la tarjeta se despegue de cualquier escritorio.
+        p.setPen(Qt.PenStyle.NoPen)
+        for i in range(MARGIN - 4, 0, -1):
+            p.setBrush(T.qc("#000000", 0.11 * (1 - i / MARGIN) ** 1.6))
+            p.drawRoundedRect(card.adjusted(-i, -i + 4, i, i + 4), RADIUS + i, RADIUS + i)
 
         path = QPainterPath()
-        path.addRoundedRect(card, 14, 14)
+        path.addRoundedRect(card, RADIUS, RADIUS)
         p.fillPath(path, T.qc(T.BG2, 0.97))
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(T.qc(accent, 0.55))
+        p.setPen(QPen(T.qc(accent, 0.55), 2))
         p.drawPath(path)
 
-        # Punto de estado: late mientras graba.
-        cx, cy = card.left() + 10, card.center().y()
-        pulse = 0.5 + 0.5 * math.sin(time.monotonic() * 5) if self.state == "recording" else 1.0
+        # Punto de estado, alineado con el bloque de texto. Respira mientras graba.
+        cx = card.left() + DOT_X
+        cy = card.top() + PAD_V + 18
+        beat = 1.0 if self.state != "recording" else 0.92 + 0.16 * (0.5 + 0.5 * math.sin(time.monotonic() * 6.9))
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(T.qc(accent, 0.18 + 0.25 * pulse))
-        p.drawEllipse(QPointF(cx, cy), 8, 8)
+        p.setBrush(T.qc(accent, 0.16))
+        p.drawEllipse(QPointF(cx, cy), 11.1 * beat, 11.1 * beat)
+        p.setBrush(T.qc(accent, 0.26))
+        p.drawEllipse(QPointF(cx, cy), 6.8 * beat, 6.8 * beat)
         p.setBrush(QColor(accent))
-        p.drawEllipse(QPointF(cx, cy), 3.6, 3.6)
+        p.drawEllipse(QPointF(cx, cy), 4, 4)
+        if self.state == "error":  # el error no late: se queda quieto y se ve
+            p.setPen(QColor(T.HI))
+            p.setFont(T.display_font(7))
+            p.drawText(QRectF(cx - 8, cy - 8, 16, 16), Qt.AlignmentFlag.AlignCenter, "!")
