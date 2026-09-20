@@ -24,7 +24,8 @@ from neonwhisper.summarizer import TEMPLATES
 from neonwhisper.ui import theme as T
 from neonwhisper.updater import RELEASES_URL, Updater, can_update
 from neonwhisper.ui.widgets import (
-    CardFlow, ClickCard, ElidedLabel, GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot,
+    CardFlow, ClickCard, ElidedLabel, GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard,
+    StatusDot, readable_hint,
     ThemeCard, ToggleSwitch, WaveBars, add_glow, add_shadow, card, glyph_icon, label, make_app_icon, on_restyle,
     repolish, restyle, set_glyph_icon, set_tone,
 )
@@ -647,6 +648,7 @@ class HistoryPage(QWidget):
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Buscar en tu historial…")
+        readable_hint(self.search)
         search_icon = self.search.addAction(glyph_icon(T.Glyph.SEARCH), QLineEdit.ActionPosition.LeadingPosition)
         on_restyle(self.search, lambda: search_icon.setIcon(glyph_icon(T.Glyph.SEARCH)))
         self.search.setClearButtonEnabled(True)
@@ -1004,6 +1006,7 @@ class MeetingsPage(QWidget):
         ask_row.setSpacing(GAP_M)
         self.ask_input = QLineEdit()
         self.ask_input.setPlaceholderText("Pregúntale a tus reuniones: «¿qué quedó pendiente para mí?»")
+        readable_hint(self.ask_input)
         self.ask_input.returnPressed.connect(self._ask)
         ask_btn = icon_button(T.Glyph.BOLT, "Preguntar", variant="primary")
         ask_btn.clicked.connect(self._ask)
@@ -1018,6 +1021,7 @@ class MeetingsPage(QWidget):
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Buscar en tus reuniones…")
+        readable_hint(self.search)
         search_icon = self.search.addAction(glyph_icon(T.Glyph.SEARCH), QLineEdit.ActionPosition.LeadingPosition)
         on_restyle(self.search, lambda: search_icon.setIcon(glyph_icon(T.Glyph.SEARCH)))
         self.search.setClearButtonEnabled(True)
@@ -1369,6 +1373,7 @@ class SettingsPage(QWidget):
                   self._combo(LANGUAGES, s.language, lambda v: ctl.update_setting("language", v)))
         self.prompt = QLineEdit(s.initial_prompt)
         self.prompt.setPlaceholderText("Luisart, LART, Talanty, CFA…")
+        readable_hint(self.prompt)
         self.prompt.setMinimumWidth(300)
         self.prompt.editingFinished.connect(lambda: ctl.update_setting("initial_prompt", self.prompt.text()))
         self._row(sec, "Vocabulario", "Nombres y términos que Whisper debe escribir bien.", self.prompt, last=True)
@@ -1516,7 +1521,9 @@ class SettingsPage(QWidget):
                                 "ícono. El cambio es inmediato, no hace falta reiniciar."))
         sec.addSpacing(GAP_S)
         theme_host = QWidget()
-        theme_cards = CardFlow(186, T.CARD_GAP, theme_host)
+        # 250 y no menos: por debajo caben cuatro por fila y la descripción de la tarjeta se
+        # corta a media palabra. Curiosamente solo pasaba con la ventana grande.
+        theme_cards = CardFlow(250, T.CARD_GAP, theme_host)
         self.theme_group = QButtonGroup(self)
         self.theme_cards: dict[str, ThemeCard] = {}
         for key in T.THEMES:
@@ -1548,7 +1555,7 @@ class SettingsPage(QWidget):
                                "cómo queda."))
         dv.addSpacing(GAP_S)
         cards_host = QWidget()
-        cards = CardFlow(186, T.CARD_GAP, cards_host)
+        cards = CardFlow(250, T.CARD_GAP, cards_host)
         self.style_group = QButtonGroup(self)
         self.style_cards: dict[str, OverlayStyleCard] = {}
         for key in STYLES:

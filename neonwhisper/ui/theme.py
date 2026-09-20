@@ -8,7 +8,7 @@ import ctypes
 import sys
 from dataclasses import dataclass
 
-from PySide6.QtGui import QColor, QFont, QFontDatabase
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 
 
 @dataclass(frozen=True)
@@ -71,7 +71,7 @@ THEMES: dict[str, UITheme] = {
         bg0="#03050b", bg1="#060a14", bg2="#08101f", bg3="#0c1628",
         line="#12203d", line_hi="#1b3363", input_bg="#050912", select_bg="#0f2a55",
         hover_bg="#0e1c36", press_bg="#0a1428",
-        text="#e6f1ff", muted="#7d8bb0", dim="#4a5878", nav_hover="#cfe9ff", on_accent="#021018",
+        text="#e6f1ff", muted="#7d8bb0", dim="#6d7fa5", nav_hover="#cfe9ff", on_accent="#021018",
         accent="#00e5ff", ice="#7df9ff", blue="#2d7dff", indigo="#5b5bff", danger="#ff4d7a", ok="#4ee6b4",
         primary_from="#2d7dff", primary_to="#2d7dff", primary_hover_from="#4a90ff", primary_hover_to="#4a90ff",
         keycap_bg="#0a1428", keycap_edge="#0b6f8c", titlebar_border="#0b6f8c",
@@ -84,7 +84,7 @@ THEMES: dict[str, UITheme] = {
         bg0="#071227", bg1="#0b1b38", bg2="#102a52", bg3="#1a3c70",
         line="#24467e", line_hi="#37639f", input_bg="#0c1f3f", select_bg="#1d4380",
         hover_bg="#1b3f77", press_bg="#16345f",
-        text="#f2fbff", muted="#a9c3e8", dim="#7192bd", nav_hover="#eaf4ff", on_accent="#04172e",
+        text="#f2fbff", muted="#a9c3e8", dim="#8ea9ca", nav_hover="#eaf4ff", on_accent="#04172e",
         accent="#7df9ff", ice="#ffffff", blue="#8fb4ff", indigo="#a99bff", danger="#ff7d9c", ok="#6fefc4",
         primary_from="#8fb4ff", primary_to="#8fb4ff", primary_hover_from="#a9c6ff", primary_hover_to="#a9c6ff",
         keycap_bg="#14315f", keycap_edge="#5f8fd6", titlebar_border="#3a6cb0",
@@ -97,7 +97,7 @@ THEMES: dict[str, UITheme] = {
         bg0="#08080a", bg1="#0c0c0f", bg2="#111114", bg3="#1b1b20",
         line="#212126", line_hi="#33333a", input_bg="#0a0a0c", select_bg="#2a2a31",
         hover_bg="#232329", press_bg="#17171b",
-        text="#f2f2f4", muted="#9a9aa4", dim="#6b6b75", nav_hover="#e6e6ea", on_accent="#0a0a0c",
+        text="#f2f2f4", muted="#9a9aa4", dim="#82828c", nav_hover="#e6e6ea", on_accent="#0a0a0c",
         accent="#e8e8ec", ice="#ffffff", blue="#9a9aa4", indigo="#7a7a84", danger="#ff9aab", ok="#9fd9c4",
         primary_from="#e4e4ea", primary_to="#e4e4ea", primary_hover_from="#f4f4f8", primary_hover_to="#f4f4f8",
         keycap_bg="#17171c", keycap_edge="#5a5a63", titlebar_border="#3a3a42",
@@ -111,13 +111,13 @@ THEMES: dict[str, UITheme] = {
         bg0="#f8f4ee", bg1="#f1eae1", bg2="#fffcf8", bg3="#efe8df",
         line="#dfd4c3", line_hi="#d2c5b4", input_bg="#ffffff", select_bg="#dcd3f6",
         hover_bg="#ede6f9", press_bg="#dfd5f2",
-        text="#2a2521", muted="#6e6459", dim="#847869", nav_hover="#1e1a16", on_accent="#ffffff",
-        accent="#6b5bd2", ice="#4a3e9e", blue="#4069c6", indigo="#7a62d6", danger="#c0405f", ok="#17795b",
+        text="#2a2521", muted="#6e6459", dim="#72675a", nav_hover="#1e1a16", on_accent="#ffffff",
+        accent="#6b5bd2", ice="#4a3e9e", blue="#4069c6", indigo="#7a62d6", danger="#a33551", ok="#14684e",
         primary_from="#6b5bd2", primary_to="#6b5bd2", primary_hover_from="#5b4bc2", primary_hover_to="#5b4bc2",
-        keycap_bg="#f2ecfc", keycap_edge="#b6a6ea", titlebar_border="#dfd4c4",
+        keycap_bg="#f2ecfc", keycap_edge="#7a63d8", titlebar_border="#dfd4c4",
         logo_idle="#efe9fb", logo_active="#ddd2f8",
         orb_hi="#fff0ea", orb_hi2="#fad3c4", orb_idle="#ffffff", orb_mid="#f0eafb", orb_deep="#e3d9f4",
-        orb_off="#f1ede7", glow=0.30, dark=False, hi="#2e2570", rec="#e2604a", rec_ink="#bf4a33",
+        orb_off="#f1ede7", glow=0.30, dark=False, hi="#2e2570", rec="#e2604a", rec_ink="#a43e2c",
     ),
 }
 DEFAULT_THEME = "neon"
@@ -277,6 +277,13 @@ def apply_stylesheet(app) -> None:
     hoja = build_stylesheet()
     app.setStyleSheet("")
     app.setStyleSheet(hoja)
+    # El texto de ayuda de un campo («Buscar en tus reuniones…») no se puede fijar desde la hoja
+    # de estilos: Qt lo saca mezclando el color del texto al 50 % con el fondo, y en el tema claro
+    # se quedaba en 3.10 de contraste. Va por la paleta, que es el único sitio que lo controla.
+    paleta = app.palette()
+    paleta.setColor(QPalette.ColorRole.Text, QColor(THEME.text))
+    paleta.setColor(QPalette.ColorRole.PlaceholderText, QColor(THEME.muted))
+    app.setPalette(paleta)
 
 
 def _build_stylesheet() -> str:
@@ -284,7 +291,12 @@ def _build_stylesheet() -> str:
     g = t.glow
     rec = t.rec_ink or t.rec  # como texto, el naranja de grabar necesita su versión profunda
     checked_bg = rgba(t.accent, 0.14)
-    checked_edge = rgba(t.accent, 0.55)
+    # En el tema claro el borde de la pestaña activa a 0.55 no se veía (2.11): se apoyaba solo en
+    # el relleno, mientras que en los oscuros el borde aporta 4.4-5.3.
+    checked_edge = rgba(t.accent, 0.55 if t.dark else 1.0)
+    # `accent` es un lavanda pensado para rellenos: como texto pequeño en un fondo claro se queda
+    # corto. En los temas oscuros sí luce, así que solo cambia el claro.
+    rotulo = t.accent if t.dark else t.ice
     return f"""
 * {{ outline: none; }}
 QWidget {{ color: {t.text}; font-family: {FONT_UI}; font-size: 11pt; }}
@@ -297,11 +309,11 @@ QLabel {{ background: transparent; }}
 QLabel[role="h1"] {{ font-family: {FONT_DISPLAY}; font-size: 28pt; font-weight: 600; color: {t.text}; }}
 QLabel[role="h2"] {{ font-family: {FONT_DISPLAY}; font-size: 15pt; font-weight: 600; color: {t.text}; }}
 QLabel[role="eyebrow"] {{
-    font-family: {FONT_DISPLAY}; font-size: 8.5pt; font-weight: 600; color: {t.accent};
+    font-family: {FONT_DISPLAY}; font-size: 8.5pt; font-weight: 600; color: {rotulo};
     letter-spacing: 1.6px; padding-top: 3px;
 }}
 QLabel[role="mini"] {{
-    font-family: {FONT_DISPLAY}; font-size: 8.5pt; font-weight: 600; color: {t.accent};
+    font-family: {FONT_DISPLAY}; font-size: 8.5pt; font-weight: 600; color: {rotulo};
     letter-spacing: 1.2px; padding-top: 3px;
 }}
 QLabel[role="muted"] {{ color: {t.muted}; font-size: 9.5pt; }}
@@ -406,7 +418,9 @@ QPushButton#Segment[pos="last"] {{ border-top-right-radius: {R_CTRL}px; border-b
 
 QLineEdit, QPlainTextEdit {{
     background: {t.input_bg}; border: 1px solid {t.line_hi}; border-radius: {R_CTRL}px;
-    padding: 9px 14px; selection-background-color: {t.select_bg}; color: {t.text};
+    padding: 9px 14px; selection-background-color: {t.select_bg};
+    /* Sin `color` a propósito: ver `apply_stylesheet`. El texto de estos campos va por la paleta
+       para que el texto de ayuda («Buscar en tus reuniones…») se pueda fijar aparte. */
 }}
 QLineEdit:focus, QPlainTextEdit:focus {{ border: 2px solid {t.accent}; padding: 8px 13px; }}
 

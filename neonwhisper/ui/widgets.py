@@ -13,7 +13,8 @@ from PySide6.QtGui import (
     QPen, QPixmap, QRadialGradient,
 )
 from PySide6.QtWidgets import (
-    QAbstractButton, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLayout, QSizePolicy, QWidget,
+    QAbstractButton, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLayout, QLineEdit,
+    QSizePolicy, QWidget,
 )
 
 from neonwhisper.hotkeys import pretty_parts
@@ -243,6 +244,42 @@ class WrapLabel(QLabel):
         # Solo si cambia: asignarlo en cada `resizeEvent` dispararía otro reparto, y otro.
         if needed > 0 and needed != self.minimumHeight():
             self.setMinimumHeight(needed)
+
+
+def readable_hint(field: QLineEdit) -> QLineEdit:
+    """Pinta el texto de ayuda de un campo con `muted` en vez de con el gris que inventa Qt.
+
+    Qt saca ese color mezclando al 50 % el color del texto con el fondo del campo, y no se puede
+    fijar: la paleta pierde contra la hoja de estilos. Sobre un campo claro esa mezcla no llega a
+    4.5 de contraste ni con el texto en negro puro —es aritmética, no configuración—, así que en
+    el tema Pastel el texto de ayuda se quedaba en 3.10. Se le quita a Qt y lo pintamos nosotros.
+    """
+    hint = field.placeholderText()
+    field.setPlaceholderText("")
+    original = field.paintEvent
+
+    def pintar(event):
+        original(event)
+        if field.text():
+            return
+        p = QPainter(field)
+        p.setPen(QColor(T.MUTED))
+        p.setFont(field.font())
+        # De dónde a dónde: se lo preguntamos al propio campo. El cursor cuando está vacío cae
+        # justo donde empieza el texto, ya descontados el relleno y el hueco de la lupa; un margen
+        # fijo pegaba la frase al borde y le pasaba por encima al icono.
+        dentro = field.contentsRect()
+        izquierda = field.cursorRect().left()
+        hueco = QRect(izquierda, dentro.top(), max(0, dentro.right() - izquierda - 8), dentro.height())
+        p.drawText(hueco, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                   QFontMetrics(field.font()).elidedText(hint, Qt.TextElideMode.ElideRight,
+                                                         hueco.width()))
+        p.end()
+
+    field.paintEvent = pintar
+    # Sin esto, al borrar la última letra el hueco se queda vacío hasta el próximo repintado.
+    field.textChanged.connect(field.update)
+    return field
 
 
 def label(text: str = "", role: str | None = None, wrap: bool = False) -> QLabel:
@@ -923,9 +960,11 @@ class OverlayStyleCard(QAbstractButton):
         p.drawText(QRectF(r.left() + 14, scene.bottom() + 9, r.width() - 50, 20),
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, look.name)
         small = QFont("Segoe UI")
-        small.setPointSizeF(8.5)
+        # A 8.5 pt y en DIM, la descripción de una tarjeta sin elegir daba 2.87 de contraste en
+        # Neón: tres de cada cuatro tarjetas están sin elegir, así que es el caso normal.
+        small.setPointSizeF(9.5)
         p.setFont(small)
-        p.setPen(QColor(T.MUTED if checked else T.DIM))
+        p.setPen(QColor(T.MUTED))
         desc = QFontMetrics(small).elidedText(look.description, Qt.TextElideMode.ElideRight, int(r.width() - 28))
         p.drawText(QRectF(r.left() + 14, scene.bottom() + 28, r.width() - 28, 18),
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, desc)
@@ -1024,9 +1063,11 @@ class ThemeCard(QAbstractButton):
         p.drawText(QRectF(r.left() + 14, scene.bottom() + 9, r.width() - 50, 20),
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, u.name)
         small = QFont("Segoe UI")
-        small.setPointSizeF(8.5)
+        # A 8.5 pt y en DIM, la descripción de una tarjeta sin elegir daba 2.87 de contraste en
+        # Neón: tres de cada cuatro tarjetas están sin elegir, así que es el caso normal.
+        small.setPointSizeF(9.5)
         p.setFont(small)
-        p.setPen(QColor(T.MUTED if checked else T.DIM))
+        p.setPen(QColor(T.MUTED))
         desc = QFontMetrics(small).elidedText(u.description, Qt.TextElideMode.ElideRight, int(r.width() - 28))
         p.drawText(QRectF(r.left() + 14, scene.bottom() + 28, r.width() - 28, 18),
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, desc)
