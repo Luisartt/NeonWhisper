@@ -133,8 +133,8 @@ class MeetingAudioTester(QObject):
     def level(self) -> float:
         return max((getattr(s, "level", 0.0) for s in self._sources.values()), default=0.0)
 
-    def start(self, mic_device: int | None) -> None:
-        from neonwhisper.meetings import Source, device_label, find_loopback_device
+    def start(self, mic_device: int | None, speaker: str = "") -> None:
+        from neonwhisper.meetings import Source, open_system_audio
 
         self.stop()
         self._peaks = {"mic": 0.0, "system": 0.0}
@@ -147,16 +147,15 @@ class MeetingAudioTester(QObject):
             log.exception("No se pudo abrir el micrófono para la prueba de reunión")
             self._set("error", f"No se pudo abrir el micrófono: {str(exc)[:90]}")
             return
-        loopback = find_loopback_device()
-        self._label = device_label(loopback) if loopback is not None else ""
-        if loopback is not None:
-            try:
-                system = Source(loopback, loopback=True)
-                system.start()
-                self._sources["system"] = system
-            except Exception:  # noqa: BLE001
-                log.exception("No se pudo abrir el loopback para la prueba")
-                self._label = ""
+        self._label = ""
+        try:
+            system = open_system_audio(speaker)
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudo abrir el audio del sistema para la prueba")
+            system = None
+        if system is not None:
+            self._sources["system"] = system
+            self._label = getattr(system, "label", "") or "salida de audio"
         self._started = time.monotonic()
         self._set("testing", f"Habla y pon un video o música…  {self.TEST_SECONDS}")
         self._timer.start()
@@ -183,8 +182,8 @@ class MeetingAudioTester(QObject):
         mic_ok = self._peaks["mic"] >= SILENT_PEAK
         mic = f"{'✓' if mic_ok else '⚠'} Tu micrófono: {int(self._peaks['mic'] * 100)}%"
         if not self._label:
-            self._set("warn", f"{mic}  ·  ✗ Audio del sistema: Windows no expone aquí un dispositivo "
-                              "«loopback», así que de una reunión solo se grabará tu voz.")
+            self._set("warn", f"{mic}  ·  ✗ Audio del sistema: no se pudo capturar la salida de audio, "
+                              "así que de una reunión solo se grabaría tu voz. Elige otra salida y vuelve a probar.")
             return
         system_ok = self._peaks["system"] >= SILENT_PEAK
         system = f"{'✓' if system_ok else '⚠'} Audio del sistema: {int(self._peaks['system'] * 100)}% ({self._label})"

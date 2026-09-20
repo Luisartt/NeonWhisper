@@ -25,6 +25,7 @@ from neonwhisper.paths import APP_DIR, LOG_FILE, MEETINGS_DIR, model_downloaded
 from neonwhisper.summarizer import Summarizer
 from neonwhisper.transcriber import Transcriber
 from neonwhisper.ui import theme as T
+from neonwhisper.ui.meeting_popup import MeetingPopup
 from neonwhisper.ui.overlay import Overlay
 from neonwhisper.ui.widgets import make_app_icon
 from neonwhisper.ui.window import MainWindow
@@ -99,6 +100,11 @@ class Controller(QObject):
         self.window = MainWindow(self)
         self.overlay = Overlay(lambda: self.recorder.level)
         self.overlay.cancel_requested.connect(self.cancel_recording)
+        self.meeting_popup = MeetingPopup()
+        self.meeting_popup.record_requested.connect(self.record_detected_meeting)
+        self.meeting_popup.stop_requested.connect(self.stop_meeting)
+        self.meeting_popup.open_requested.connect(lambda: (self.show_window(), self.window.go_to(2)))
+        self._detected: tuple[str, str] | None = None
         self._apply_overlay_look()
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self.settings.save)
 
@@ -140,6 +146,8 @@ class Controller(QObject):
             self.tray.setIcon(self.icon_active if recording else self.icon_idle)
         if getattr(self, "window", None):
             self.window.restyle()
+        if getattr(self, "meeting_popup", None):
+            self.meeting_popup.restyle()
 
     def _sync_overlay_style(self) -> None:
         """Deja la barra flotante con el diseño del mismo nombre que el tema."""
@@ -190,6 +198,7 @@ class Controller(QObject):
 
     def quit(self) -> None:
         self.quitting = True
+        self.meeting_popup.hide()
         if self._save_timer.isActive():
             self._save_timer.stop()
             self.settings.save()
@@ -395,16 +404,27 @@ class Controller(QObject):
         """El detector dice que entraste a una reunión."""
         if not self.settings.meetings_enabled or self.meeting_recorder.recording:
             return
-        if not self.settings.meeting_auto_start:
+        self._detected = (found.app, found.title)
+        if self.settings.meeting_auto_start:
+            self.start_meeting(found.app, found.title)
+        elif self.settings.meeting_popup:
+            self.meeting_popup.show_prompt(found.app, found.title)
+        else:
             self.tray.showMessage(
                 "NeonWhisper", f"Parece que entraste a una reunión de {found.app}. "
                 "Abre NeonWhisper y dale a «Grabar» si quieres registrarla.", self.icon_idle, 6000)
-            return
-        self.start_meeting(found.app, found.title)
+
+    def record_detected_meeting(self) -> None:
+        """Botón «Grabar» del aviso flotante."""
+        app, title = self._detected or ("Manual", "")
+        self.start_meeting(app, title)
 
     def on_meeting_ended(self) -> None:
+        self._detected = None
         if self.meeting_recorder.recording:
             self.stop_meeting()
+        elif self.meeting_popup.state == "prompt":
+            self.meeting_popup.fade_out()
 
     def toggle_meeting(self) -> None:
         if self.meeting_recorder.recording:
@@ -423,6 +443,7 @@ class Controller(QObject):
                 mic=resolve_input_device(self.settings.input_device_name, self.settings.input_device),
                 system=self.settings.meeting_capture_system,
                 mic_muted=not self.settings.meeting_record_mic,
+                speaker=self.settings.meeting_speaker,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("No se pudo empezar a grabar la reunión")
@@ -433,6 +454,8 @@ class Controller(QObject):
         detail = self.meeting_recorder.describe()
         log.info("Grabando reunión %s (%s) en %s", meeting.id, detail, path)
         self.tray.showMessage("NeonWhisper", f"Grabando la reunión de {app} ({detail}).", self.icon_active, 4000)
+        if self.settings.meeting_popup:
+            self.meeting_popup.show_recording(app, self.meeting_recorder.describe_short())
         self.window.meetings.refresh()
         self._set_ui_state()
 
@@ -453,11 +476,14 @@ class Controller(QObject):
             self.meetings.delete(meeting_id)
             if path:
                 path.unlink(missing_ok=True)
+            self.meeting_popup.fade_out()
             self._notify(f"Reunión muy corta ({seconds:.0f} s): no se guardó")
             self.window.meetings.refresh()
             self._set_ui_state()
             return
         self.meetings.update(meeting_id, duration=seconds, state="transcribiendo")
+        if self.settings.meeting_popup:
+            self.meeting_popup.show_saved(f"{seconds / 60:.0f} min · transcribiendo…")
         self.window.meetings.refresh()
         self._queue_meeting(meeting_id, str(path), seconds)
         self._set_ui_state()

@@ -836,9 +836,19 @@ class SettingsPage(QWidget):
                   "Tu voz en la grabación. Puedes silenciarla en caliente desde la pestaña Reuniones.",
                   self._toggle(s.meeting_record_mic, lambda v: ctl.update_setting("meeting_record_mic", v)))
         self._row(sec, "Grabar el audio del sistema",
-                  "Lo que dicen los demás, además de tu micrófono. Necesita un dispositivo «loopback» "
-                  "de Windows; si no lo hay, se graba solo tu micrófono.",
+                  "Lo que dicen los demás, además de tu micrófono. Se captura de tu salida de audio "
+                  "(bocinas o audífonos) sin instalar nada.",
                   self._toggle(s.meeting_capture_system, lambda v: ctl.update_setting("meeting_capture_system", v)))
+        self.speaker_combo = NoWheelComboBox()
+        self._fill_speakers(s.meeting_speaker)
+        self.speaker_combo.currentIndexChanged.connect(
+            lambda _: ctl.update_setting("meeting_speaker", self.speaker_combo.currentData() or ""))
+        self._row(sec, "Salida que se captura",
+                  "De dónde se toma el audio de los demás. Debe ser por donde los escuchas.",
+                  self.speaker_combo)
+        self._row(sec, "Aviso flotante",
+                  "Un recuadro pequeño arriba a la izquierda al detectar la reunión, con el botón de grabar.",
+                  self._toggle(s.meeting_popup, lambda v: ctl.update_setting("meeting_popup", v)))
         self._row(sec, "Conservar el audio", "Guarda el .wav de la reunión. Ocupa ~2 MB por minuto.",
                   self._toggle(s.meeting_keep_audio, lambda v: ctl.update_setting("meeting_keep_audio", v)))
         # Probar las dos fuentes antes de una reunión de verdad.
@@ -1060,6 +1070,19 @@ class SettingsPage(QWidget):
         if style_card:
             style_card.setChecked(True)
 
+    def _fill_speakers(self, current: str) -> None:
+        from neonwhisper.meetings import list_speakers
+
+        self.speaker_combo.blockSignals(True)
+        self.speaker_combo.clear()
+        self.speaker_combo.addItem("Salida predeterminada de Windows", "")
+        for name in list_speakers():
+            self.speaker_combo.addItem(name, name)
+        if current and self.speaker_combo.findData(current) < 0:
+            self.speaker_combo.addItem(f"{current} (no conectada)", current)
+        self.speaker_combo.setCurrentIndex(max(0, self.speaker_combo.findData(current)))
+        self.speaker_combo.blockSignals(False)
+
     def refresh_models(self, key: str | None = None) -> None:
         for k, row in {**self.model_rows, **self.summary_rows}.items():
             if key is None or k == key:
@@ -1096,7 +1119,7 @@ class SettingsPage(QWidget):
             return
         self.mic_tester.stop()
         s = self.ctl.settings
-        self.meeting_audio.start(resolve_input_device(s.input_device_name, s.input_device))
+        self.meeting_audio.start(resolve_input_device(s.input_device_name, s.input_device), s.meeting_speaker)
 
     def _on_meeting_audio_test(self, state: str, message: str) -> None:
         active = state == "testing"

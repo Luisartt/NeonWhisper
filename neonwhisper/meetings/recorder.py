@@ -1,8 +1,9 @@
 """Graba una reunión a disco: tu micrófono y lo que suena en tu PC, mezclados en un .wav.
 
-El audio del sistema se captura con los dispositivos *loopback* de WASAPI, que Windows
-expone como entradas más (p. ej. «Altavoces (Realtek) [Loopback]»). Si no hay ninguno,
-se graba solo el micrófono y se avisa; la reunión se sigue transcribiendo igual.
+El audio del sistema se captura abriendo el altavoz en modo loopback con WASAPI
+(ver `system_audio.py`), que funciona con cualquier salida. Si eso falla se prueba con un
+dispositivo de entrada «loopback»/«Stereo Mix», y si tampoco hay, se graba solo el micrófono
+y se avisa; la reunión se sigue transcribiendo igual.
 
 Se escribe en el .wav según llega (16 kHz mono, 16 bits: ~2 MB por minuto), así una
 reunión de dos horas no ocupa memoria y sobrevive a que la app se cierre a lo bruto.
@@ -17,6 +18,7 @@ import numpy as np
 import sounddevice as sd
 
 from neonwhisper.audio import SAMPLE_RATE, level_of
+from neonwhisper.meetings.system_audio import open_system_source
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +60,21 @@ def find_loopback_device(output_name: str = "") -> int | None:
     return candidates[0][0]
 
 
+def open_system_audio(speaker: str = ""):
+    """Lo que suena en la PC: primero WASAPI loopback, si no un dispositivo «loopback»/«Stereo Mix»."""
+    try:
+        return open_system_source(speaker)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("WASAPI loopback no disponible (%s): se busca un dispositivo de entrada", exc)
+    index = find_loopback_device()
+    if index is None:
+        return None
+    source = Source(index, loopback=True)
+    source.start()
+    source.label = device_label(index)
+    return source
+
+
 def to_mono_16k(block: np.ndarray, rate: int) -> np.ndarray:
     """Mezcla los canales y lleva el bloque a 16 kHz."""
     mono = block.mean(axis=1) if block.ndim > 1 else block
@@ -73,6 +90,7 @@ class Source:
     def __init__(self, device: int | None, loopback: bool = False, muted: bool = False):
         self.device = device
         self.loopback = loopback
+        self.label = ""
         self.muted = muted  # silenciada: se sigue leyendo (para no desincronizar) pero no se graba
         self.buffer = np.zeros(0, dtype=np.float32)
         self.level = 0.0
@@ -137,6 +155,7 @@ class MeetingRecorder:
         self.path: Path | None = None
         self.started_at = 0.0
         self.system_audio = False  # si se está capturando lo que suena en la PC
+        self.system_label = ""     # qué salida se está capturando
         self.level = 0.0
 
     @property
@@ -170,6 +189,12 @@ class MeetingRecorder:
         """Qué fuentes hay y cuáles están grabando ahora mismo."""
         return {kind: (self._source(kind) is not None and not self.is_muted(kind)) for kind in ("mic", "system")}
 
+    def describe_short(self) -> str:
+        """Versión corta para el aviso flotante: «micro + sistema»."""
+        names = {"mic": "micro", "system": "sistema"}
+        active = [names[k] for k, on in self.sources.items() if on]
+        return " + ".join(active) if active else "silenciado"
+
     def describe(self) -> str:
         """«tu micrófono + el audio del sistema», «solo tu micrófono»… para avisos y la interfaz."""
         names = {"mic": "tu micrófono", "system": "el audio del sistema"}
@@ -178,30 +203,30 @@ class MeetingRecorder:
             return "nada: las dos fuentes están silenciadas"
         return " + ".join(active) if len(active) > 1 else f"solo {active[0]}"
 
-    def start(self, path: Path, mic: int | None = None, system: bool = True, mic_muted: bool = False) -> None:
+    def start(self, path: Path, mic: int | None = None, system: bool = True, mic_muted: bool = False,
+              speaker: str = "") -> None:
         if self.recording:
             return
-        sources = [Source(mic, muted=mic_muted)]
-        self.system_audio = False
+        microphone = Source(mic, muted=mic_muted)
+        try:
+            microphone.start()
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudo abrir el micrófono %s", mic)
+            raise
+        sources = [microphone]
+        self.system_audio, self.system_label = False, ""
         if system:
-            loopback = find_loopback_device()
-            if loopback is None:
-                log.warning("Sin dispositivo loopback: se grabará solo el micrófono")
-            else:
-                sources.append(Source(loopback, loopback=True))
-                self.system_audio = True
-        for source in sources:
             try:
-                source.start()
+                loopback = open_system_audio(speaker)
             except Exception:  # noqa: BLE001
-                log.exception("No se pudo abrir la fuente %s", source.device)
-                if not source.loopback:
-                    for other in sources:
-                        other.stop()
-                    raise
-                sources.remove(source)
-                self.system_audio = False
-                break
+                log.exception("No se pudo capturar el audio del sistema")
+                loopback = None
+            if loopback is None:
+                log.warning("Sin audio del sistema: se grabará solo el micrófono")
+            else:
+                sources.append(loopback)
+                self.system_audio = True
+                self.system_label = getattr(loopback, "label", "")
 
         path.parent.mkdir(parents=True, exist_ok=True)
         handle = wave.open(str(path), "wb")

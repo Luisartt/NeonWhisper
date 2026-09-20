@@ -58,6 +58,8 @@ class Settings:
     meeting_auto_start: bool = True  # al detectar la reunión, grabar sin preguntar
     meeting_record_mic: bool = True  # grabar tu voz (puedes silenciarla en caliente)
     meeting_capture_system: bool = True  # además del micrófono, lo que suena en tu PC
+    meeting_speaker: str = ""  # salida que se captura ("" = la predeterminada de Windows)
+    meeting_popup: bool = True  # aviso flotante arriba a la izquierda al detectar una reunión
     meeting_keep_audio: bool = False  # conservar el .wav después de transcribir
     meeting_min_seconds: int = 60  # reuniones más cortas que esto se descartan
     meeting_summary_model: str = "llama-3.2-3b"  # ver SUMMARY_MODELS ("" = solo transcripción)
