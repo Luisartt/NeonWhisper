@@ -26,7 +26,7 @@ from neonwhisper.hotkeys import HotkeyManager, is_safe_hotkey
 from neonwhisper.paster import Paster
 from neonwhisper.paths import APP_DIR, LOG_FILE, MEETINGS_DIR, model_downloaded
 from neonwhisper.summarizer import Summarizer
-from neonwhisper.transcriber import Transcriber
+from neonwhisper.transcriber import Transcriber, join_sentences
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.meeting_popup import MeetingPopup
 from neonwhisper.ui.overlay import Overlay
@@ -653,7 +653,7 @@ class Controller(QObject):
         if self.meeting_queue and self.meeting_queue[0][0] == meeting_id and self.meeting_queue[0][1] == index:
             self.meeting_queue.pop(0)
         self.meeting_parts.setdefault(meeting_id, []).append(text)
-        transcript = " ".join(p for p in self.meeting_parts[meeting_id] if p).strip()
+        transcript = join_sentences(p for p in self.meeting_parts[meeting_id] if p)
         self.meetings.update(meeting_id, transcript=transcript)
         self.window.meetings.set_progress(meeting_id, f"Transcribiendo… {index}/{total}")
         if index >= total:

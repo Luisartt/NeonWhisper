@@ -75,13 +75,44 @@ def open_system_audio(speaker: str = ""):
     return source
 
 
-def to_mono_16k(block: np.ndarray, rate: int) -> np.ndarray:
-    """Mezcla los canales y lleva el bloque a 16 kHz."""
-    mono = block.mean(axis=1) if block.ndim > 1 else block
+_FILTERS: dict[int, np.ndarray] = {}
+
+
+def _lowpass(rate: int, taps: int = 101) -> np.ndarray:
+    """Filtro que quita lo que está por encima de 8 kHz antes de bajar a 16 kHz."""
+    if rate not in _FILTERS:
+        n = np.arange(taps) - (taps - 1) / 2
+        h = np.sinc(2 * (0.45 * SAMPLE_RATE) / rate * n) * np.blackman(taps)
+        _FILTERS[rate] = (h / h.sum()).astype(np.float32)
+    return _FILTERS[rate]
+
+
+def to_mono_16k(block: np.ndarray, rate: int, tail: np.ndarray | None = None):
+    """Mezcla los canales y baja el bloque a 16 kHz, sin alias.
+
+    Bajar de 48 kHz a 16 kHz sin filtrar antes pliega todo lo que suena por encima de 8 kHz
+    dentro de la voz: un chasquido de teclado de 15 kHz aparecía como un tono de 1 kHz casi igual
+    de fuerte, justo encima de las frecuencias que Whisper escucha. Con `tail` se guarda el final
+    del bloque anterior para que el filtro no deje un chasquido en cada costura.
+
+    Devuelve el audio, o (audio, nueva_cola) si se pasó `tail`.
+    """
+    mono = (block.mean(axis=1) if block.ndim > 1 else block).astype(np.float32)
+    new_tail = None
     if rate != SAMPLE_RATE:
+        h = _lowpass(rate)
+        if tail is None:
+            mono = np.convolve(mono, h, mode="same")
+        else:
+            padded = np.concatenate([tail, mono])
+            new_tail = padded[-(len(h) - 1):].copy() if len(padded) >= len(h) - 1 else padded.copy()
+            filtered = np.convolve(padded, h, mode="valid")
+            mono = filtered[-len(mono):] if len(filtered) >= len(mono) else filtered
         n = max(1, int(round(len(mono) * SAMPLE_RATE / rate)))
-        mono = np.interp(np.linspace(0, len(mono) - 1, n), np.arange(len(mono)), mono)
-    return mono.astype(np.float32)
+        if len(mono) > 1:
+            mono = np.interp(np.linspace(0, len(mono) - 1, n), np.arange(len(mono)), mono)
+    mono = mono.astype(np.float32)
+    return (mono, new_tail if new_tail is not None else np.zeros(0, dtype=np.float32)) if tail is not None else mono
 
 
 class Source:
@@ -98,6 +129,7 @@ class Source:
         self._lock = threading.Lock()
         self._stream: sd.InputStream | None = None
         self._rate = SAMPLE_RATE
+        self._tail = np.zeros(0, dtype=np.float32)  # cola del filtro antialias
 
     def start(self) -> None:
         info = sd.query_devices(self.device, "input")
@@ -122,7 +154,7 @@ class Source:
         raise RuntimeError(f"No se pudo abrir el dispositivo {self.device}")
 
     def _callback(self, indata, frames, time_info, status):  # hilo de PortAudio
-        block = to_mono_16k(indata.copy(), self._rate)
+        block, self._tail = to_mono_16k(indata.copy(), self._rate, self._tail)
         with self._lock:
             self.buffer = np.concatenate([self.buffer, block])
         self.level = 0.0 if self.muted else level_of(block)
@@ -293,10 +325,14 @@ class MeetingRecorder:
         if count <= 0:
             return
         mix = np.zeros(count, dtype=np.float32)
+        grabando = [s for s in alive if not s.muted]
+        # Con dos fuentes fuertes, sumarlas a pelo pasaba de 1.0 y la onda se recortaba: eso es
+        # justo la distorsión que más confunde a Whisper. Se les deja margen antes de sumar.
+        gain = 0.6 if len(grabando) > 1 else 1.0
         for source in alive:
             taken = source.take(count)  # se consume siempre, aunque esté silenciada
             if not source.muted:
-                mix += taken
+                mix += taken * gain
         np.clip(mix, -1.0, 1.0, out=mix)
         self.level = level_of(mix[-1600:]) if len(mix) else 0.0
         try:
