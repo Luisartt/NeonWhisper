@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 
 # Color del estado de una reunión (en el panel de inicio y en la lista de Reuniones).
-STATE_TONES = {"grabando": "danger", "transcribiendo": "accent", "resumiendo": "accent", "lista": "ok",
+STATE_TONES = {"grabando": "rec", "transcribiendo": "accent", "resumiendo": "accent", "lista": "ok",
                "error": "danger"}
 
 

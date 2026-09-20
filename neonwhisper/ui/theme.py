@@ -58,9 +58,11 @@ class UITheme:
     orb_deep: str
     orb_off: str
     glow: float       # intensidad de los brillos (1 = neón)
-    # Los dos últimos traen valor por defecto porque los temas oscuros ya los cumplían sin decirlo.
+    # Los últimos traen valor por defecto porque los temas oscuros ya los cumplían sin decirlo.
     dark: bool = True  # False en temas claros: el fondo de la ventana es claro
     hi: str = "#ffffff"  # el color de mayor contraste sobre las superficies del tema (tinta en los claros)
+    rec: str = "#ff6a4d"  # grabando: su propio color, para no confundirlo con un error
+    rec_ink: str = ""     # versión del anterior que sí se lee como texto ("" = el mismo)
 
 
 THEMES: dict[str, UITheme] = {
@@ -70,12 +72,12 @@ THEMES: dict[str, UITheme] = {
         line="#12203d", line_hi="#1b3363", input_bg="#050912", select_bg="#0f2a55",
         hover_bg="#0e1c36", press_bg="#0a1428",
         text="#e6f1ff", muted="#7d8bb0", dim="#4a5878", nav_hover="#cfe9ff", on_accent="#021018",
-        accent="#00e5ff", ice="#7df9ff", blue="#2d7dff", indigo="#5b5bff", danger="#ff4d7a", ok="#3dffc5",
-        primary_from="#2d7dff", primary_to="#00b8e6", primary_hover_from="#4a90ff", primary_hover_to="#00e5ff",
+        accent="#00e5ff", ice="#7df9ff", blue="#2d7dff", indigo="#5b5bff", danger="#ff4d7a", ok="#4ee6b4",
+        primary_from="#2d7dff", primary_to="#2d7dff", primary_hover_from="#4a90ff", primary_hover_to="#4a90ff",
         keycap_bg="#0a1428", keycap_edge="#0b6f8c", titlebar_border="#0b6f8c",
         logo_idle="#0b1a38", logo_active="#0a2d52",
         orb_hi="#0d5d8f", orb_hi2="#07284d", orb_idle="#132f5a", orb_mid="#081327", orb_deep="#02050c",
-        orb_off="#0c1426", glow=1.0,
+        orb_off="#0c1426", glow=0.72, rec="#ff6a4d",
     ),
     "glass": UITheme(
         key="glass", name="Cristal", description="Vidrio azul, claro y luminoso",
@@ -83,12 +85,12 @@ THEMES: dict[str, UITheme] = {
         line="#24467e", line_hi="#37639f", input_bg="#0c1f3f", select_bg="#1d4380",
         hover_bg="#1b3f77", press_bg="#16345f",
         text="#f2fbff", muted="#a9c3e8", dim="#7192bd", nav_hover="#eaf4ff", on_accent="#04172e",
-        accent="#7df9ff", ice="#ffffff", blue="#8fb4ff", indigo="#a99bff", danger="#ff7d9c", ok="#5ef0c0",
-        primary_from="#8fb4ff", primary_to="#7df9ff", primary_hover_from="#a9c6ff", primary_hover_to="#b6fdff",
+        accent="#7df9ff", ice="#ffffff", blue="#8fb4ff", indigo="#a99bff", danger="#ff7d9c", ok="#6fefc4",
+        primary_from="#8fb4ff", primary_to="#8fb4ff", primary_hover_from="#a9c6ff", primary_hover_to="#a9c6ff",
         keycap_bg="#14315f", keycap_edge="#5f8fd6", titlebar_border="#3a6cb0",
         logo_idle="#183a6d", logo_active="#2a68ab",
         orb_hi="#2f6fb5", orb_hi2="#17396e", orb_idle="#27538f", orb_mid="#122c55", orb_deep="#08182f",
-        orb_off="#16294a", glow=0.8,
+        orb_off="#16294a", glow=0.60, rec="#ff8e6b",
     ),
     "mono": UITheme(
         key="mono", name="Sutil", description="Negro con tonos blancos, sin color",
@@ -96,25 +98,26 @@ THEMES: dict[str, UITheme] = {
         line="#212126", line_hi="#33333a", input_bg="#0a0a0c", select_bg="#2a2a31",
         hover_bg="#232329", press_bg="#17171b",
         text="#f2f2f4", muted="#9a9aa4", dim="#6b6b75", nav_hover="#e6e6ea", on_accent="#0a0a0c",
-        accent="#e8e8ec", ice="#ffffff", blue="#9a9aa4", indigo="#7a7a84", danger="#ff8a9e", ok="#ffffff",
-        primary_from="#d4d4da", primary_to="#ffffff", primary_hover_from="#e8e8ee", primary_hover_to="#ffffff",
+        accent="#e8e8ec", ice="#ffffff", blue="#9a9aa4", indigo="#7a7a84", danger="#ff9aab", ok="#9fd9c4",
+        primary_from="#e4e4ea", primary_to="#e4e4ea", primary_hover_from="#f4f4f8", primary_hover_to="#f4f4f8",
         keycap_bg="#17171c", keycap_edge="#5a5a63", titlebar_border="#3a3a42",
         logo_idle="#1c1c21", logo_active="#3a3a42",
         orb_hi="#4a4a52", orb_hi2="#232329", orb_idle="#2b2b31", orb_mid="#141418", orb_deep="#050506",
-        orb_off="#131317", glow=0.55,
+        orb_off="#131317", glow=0.45, rec="#f08a6a",
     ),
     "pastel": UITheme(
         key="pastel", name="Pastel", description="Crema con lavanda, menta y durazno",
-        bg0="#f8f5f0", bg1="#f2eee7", bg2="#ffffff", bg3="#efeaf9",
-        line="#e7e0d6", line_hi="#d5cbe6", input_bg="#ffffff", select_bg="#ddd2fb",
-        hover_bg="#ece5fb", press_bg="#ddd3f6",
-        text="#2e2544", muted="#6b5f86", dim="#6f6389", nav_hover="#3a2f5e", on_accent="#ffffff",
-        accent="#6b4ef0", ice="#4a33b8", blue="#5b8def", indigo="#9a7bf5", danger="#c43c6a", ok="#0b7d60",
-        primary_from="#6f4ae8", primary_to="#5a34d6", primary_hover_from="#5f3ada", primary_hover_to="#4c2bc0",
-        keycap_bg="#f3eefd", keycap_edge="#b9a6ef", titlebar_border="#cabbef",
-        logo_idle="#e7defd", logo_active="#cdbaff",
-        orb_hi="#7c63e8", orb_hi2="#6247c9", orb_idle="#efe9ff", orb_mid="#e3d9ff", orb_deep="#d2c4f7",
-        orb_off="#eceaf2", glow=0.35, dark=False, hi="#241b3f",
+        # Los pasteles solo se usan como relleno: lo que es texto o trazo va en su versión profunda.
+        bg0="#f8f4ee", bg1="#f1eae1", bg2="#fffcf8", bg3="#efe8df",
+        line="#dfd4c3", line_hi="#d2c5b4", input_bg="#ffffff", select_bg="#dcd3f6",
+        hover_bg="#ede6f9", press_bg="#dfd5f2",
+        text="#2a2521", muted="#6e6459", dim="#847869", nav_hover="#1e1a16", on_accent="#ffffff",
+        accent="#6b5bd2", ice="#4a3e9e", blue="#4069c6", indigo="#7a62d6", danger="#c0405f", ok="#17795b",
+        primary_from="#6b5bd2", primary_to="#6b5bd2", primary_hover_from="#5b4bc2", primary_hover_to="#5b4bc2",
+        keycap_bg="#f2ecfc", keycap_edge="#b6a6ea", titlebar_border="#dfd4c4",
+        logo_idle="#efe9fb", logo_active="#ddd2f8",
+        orb_hi="#fff0ea", orb_hi2="#fad3c4", orb_idle="#ffffff", orb_mid="#f0eafb", orb_deep="#e3d9f4",
+        orb_off="#f1ede7", glow=0.30, dark=False, hi="#2e2570", rec="#e2604a", rec_ink="#bf4a33",
     ),
 }
 DEFAULT_THEME = "neon"
@@ -125,7 +128,7 @@ THEME = THEMES[DEFAULT_THEME]
 # set_theme() las reescribe; los widgets que pintan a mano las leen como T.CYAN, T.BG0, etc.
 # (los colores que solo usa la hoja de estilos se leen del tema: THEME.input_bg, THEME.keycap_bg…)
 BG0 = BG1 = BG2 = BG3 = LINE = LINE_HI = TEXT = MUTED = DIM = ON_ACCENT = HI = ""
-CYAN = ICE = BLUE = INDIGO = DANGER = OK = ""
+CYAN = ICE = BLUE = INDIGO = DANGER = OK = REC = REC_INK = ""
 LOGO_IDLE = LOGO_ACTIVE = ORB_HI = ORB_HI2 = ORB_IDLE = ORB_MID = ORB_DEEP = ORB_OFF = ""
 GLOW = 1.0
 
@@ -133,6 +136,7 @@ _ALIASES = {
     "BG0": "bg0", "BG1": "bg1", "BG2": "bg2", "BG3": "bg3", "LINE": "line", "LINE_HI": "line_hi",
     "TEXT": "text", "MUTED": "muted", "DIM": "dim", "ON_ACCENT": "on_accent", "HI": "hi",
     "CYAN": "accent", "ICE": "ice", "BLUE": "blue", "INDIGO": "indigo", "DANGER": "danger", "OK": "ok",
+    "REC": "rec",
     "LOGO_IDLE": "logo_idle", "LOGO_ACTIVE": "logo_active",
     "ORB_HI": "orb_hi", "ORB_HI2": "orb_hi2", "ORB_IDLE": "orb_idle", "ORB_MID": "orb_mid",
     "ORB_DEEP": "orb_deep", "ORB_OFF": "orb_off", "GLOW": "glow",
@@ -144,6 +148,7 @@ def set_theme(key: str) -> UITheme:
     global THEME
     THEME = THEMES.get(key, THEMES[DEFAULT_THEME])
     globals().update({name: getattr(THEME, field) for name, field in _ALIASES.items()})
+    globals()["REC_INK"] = THEME.rec_ink or THEME.rec
     return THEME
 
 
@@ -233,6 +238,7 @@ def build_stylesheet() -> str:
     """Hoja de estilos del tema activo. Se vuelve a aplicar al cambiar de tema."""
     t = THEME
     g = t.glow
+    rec = t.rec_ink or t.rec  # como texto, el naranja de grabar necesita su versión profunda
     return f"""
 * {{ outline: none; }}
 QWidget {{ color: {t.text}; font-family: {FONT_UI}; font-size: 11pt; }}
@@ -275,10 +281,12 @@ QLabel[role="chip"] {{
 QLabel[role="chip"][tone="ok"] {{ color: {t.ok}; border-color: {rgba(t.ok, 0.45)}; background: {rgba(t.ok, 0.12)}; }}
 QLabel[role="chip"][tone="danger"] {{ color: {t.danger}; border-color: {rgba(t.danger, 0.45)}; background: {rgba(t.danger, 0.12)}; }}
 QLabel[role="chip"][tone="accent"] {{ color: {t.ice}; border-color: {rgba(t.accent, 0.45)}; background: {rgba(t.accent, 0.12)}; }}
+QLabel[role="chip"][tone="rec"] {{ color: {rec}; border-color: {rgba(t.rec, 0.55)}; background: {rgba(t.rec, 0.14)}; }}
 QLabel[role="detail"] {{ font-size: 9.5pt; color: {t.muted}; }}
 QLabel[role="micstatus"] {{ font-size: 9.5pt; color: {t.muted}; }}
 QLabel[role="dlstatus"] {{ font-size: 9.5pt; color: {t.muted}; }}
 QLabel[tone="ok"] {{ color: {t.ok}; }}
+QLabel[tone="rec"] {{ color: {rec}; }}
 QLabel[tone="danger"] {{ color: {t.danger}; }}
 QLabel[tone="accent"] {{ color: {t.ice}; }}
 QLabel[tone="muted"] {{ color: {t.muted}; }}

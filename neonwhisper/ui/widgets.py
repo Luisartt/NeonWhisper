@@ -319,7 +319,7 @@ class StatusDot(QWidget):
 
     def _color(self) -> str:
         return {"ready": T.OK, "error": T.DANGER, "loading": T.BLUE,
-                "downloading": T.BLUE, "recording": T.CYAN}.get(self.state, T.MUTED)
+                "downloading": T.BLUE, "recording": T.REC}.get(self.state, T.MUTED)
 
     def paintEvent(self, _):
         p = QPainter(self)
@@ -452,7 +452,8 @@ class MicOrb(QWidget):
         if rec:
             side = R * 0.52
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor("#ffffff"))
+            # En pastel el núcleo es durazno claro: el cuadro de detener va en tinta, no en blanco.
+            p.setBrush(QColor(T.HI if T.THEME.dark else T.REC_INK))
             p.drawRoundedRect(QRectF(c.x() - side / 2, c.y() - side / 2, side, side), side * 0.22, side * 0.22)
         else:
             f = QFont(T.icon_family())
