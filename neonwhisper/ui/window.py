@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QShowEvent
+from PySide6.QtGui import QCloseEvent, QFont, QShowEvent
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QVBoxLayout, QWidget,
@@ -78,7 +78,7 @@ def scrollable(inner: QWidget) -> QScrollArea:
 
 def page_header(eyebrow: str, title: str, subtitle: str = "") -> QVBoxLayout:
     box = QVBoxLayout()
-    box.setSpacing(4)
+    box.setSpacing(6)
     box.addWidget(label(eyebrow, "eyebrow"))
     h1 = label(title, "h1")
     box.addWidget(h1)
@@ -276,8 +276,8 @@ class EntryCard(QFrame):
         self.setObjectName("Card")
         self.entry, self.ctl = entry, ctl
         v = QVBoxLayout(self)
-        v.setContentsMargins(20, 12, 12, 14)
-        v.setSpacing(6)
+        v.setContentsMargins(T.CARD_PAD, 16, 16, 18)
+        v.setSpacing(8)
         top = QHBoxLayout()
         words = len(entry.text.split())
         meta = f"{human_date(entry.created_at)}   ·   {entry.duration:.0f} s   ·   {words} palabra{'s' if words != 1 else ''}"
@@ -306,10 +306,11 @@ class HistoryPage(QWidget):
         super().__init__()
         self.ctl = ctl
         root = QVBoxLayout(self)
-        root.setContentsMargins(44, 34, 44, 20)
-        root.setSpacing(16)
+        root.setContentsMargins(T.PAGE_MARGIN, 34, T.PAGE_MARGIN, 24)
+        root.setSpacing(T.BLOCK_GAP)
 
         head = QHBoxLayout()
+        head.setSpacing(12)
         head.addLayout(page_header("TUS DICTADOS", "Historial"), 1)
         export = icon_button(T.Glyph.EXPORT, "Exportar")
         export.clicked.connect(self._export)
@@ -330,8 +331,8 @@ class HistoryPage(QWidget):
 
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
-        self.list_layout.setContentsMargins(0, 0, 8, 0)
-        self.list_layout.setSpacing(10)
+        self.list_layout.setContentsMargins(0, 2, 10, 6)
+        self.list_layout.setSpacing(12)
         root.addWidget(scrollable(self.list_host), 1)
         self.refresh()
 
@@ -402,8 +403,8 @@ class MeetingCard(QFrame):
         self.meeting, self.ctl = meeting, ctl
         self.open = False
         v = QVBoxLayout(self)
-        v.setContentsMargins(20, 14, 14, 14)
-        v.setSpacing(8)
+        v.setContentsMargins(T.CARD_PAD, 18, 16, 18)
+        v.setSpacing(10)
 
         top = QHBoxLayout()
         top.setSpacing(12)
@@ -503,10 +504,11 @@ class MeetingsPage(QWidget):
         self.ctl = ctl
         self.cards: dict[int, MeetingCard] = {}
         root = QVBoxLayout(self)
-        root.setContentsMargins(44, 34, 44, 20)
-        root.setSpacing(16)
+        root.setContentsMargins(T.PAGE_MARGIN, 34, T.PAGE_MARGIN, 24)
+        root.setSpacing(T.BLOCK_GAP)
 
         head = QHBoxLayout()
+        head.setSpacing(12)
         head.addLayout(page_header(
             "GRABADAS EN TU PC", "Reuniones",
             "NeonWhisper detecta cuándo entras a una reunión, la graba y al terminar te deja la "
@@ -519,8 +521,8 @@ class MeetingsPage(QWidget):
         # Tarjeta de la reunión en curso.
         self.live = card(glow=True)
         live_box = QVBoxLayout(self.live)
-        live_box.setContentsMargins(20, 14, 20, 14)
-        live_box.setSpacing(12)
+        live_box.setContentsMargins(T.CARD_PAD, 18, T.CARD_PAD, 18)
+        live_box.setSpacing(14)
         live_row = QWidget()
         live = QHBoxLayout(live_row)
         live.setContentsMargins(0, 0, 0, 0)
@@ -591,8 +593,8 @@ class MeetingsPage(QWidget):
         # Preguntar a tus reuniones, con el modelo local.
         self.ask_card = card()
         ask_box = QVBoxLayout(self.ask_card)
-        ask_box.setContentsMargins(20, 14, 20, 14)
-        ask_box.setSpacing(8)
+        ask_box.setContentsMargins(T.CARD_PAD, 18, T.CARD_PAD, 18)
+        ask_box.setSpacing(10)
         ask_row = QHBoxLayout()
         ask_row.setSpacing(10)
         self.ask_input = QLineEdit()
@@ -620,8 +622,8 @@ class MeetingsPage(QWidget):
 
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
-        self.list_layout.setContentsMargins(0, 0, 8, 0)
-        self.list_layout.setSpacing(10)
+        self.list_layout.setContentsMargins(0, 2, 10, 6)
+        self.list_layout.setSpacing(12)
         root.addWidget(scrollable(self.list_host), 1)
         self.refresh()
 
@@ -814,8 +816,8 @@ class SettingsPage(QWidget):
         s = ctl.settings
         inner = QWidget()
         root = QVBoxLayout(inner)
-        root.setContentsMargins(44, 34, 36, 34)
-        root.setSpacing(18)
+        root.setContentsMargins(T.PAGE_MARGIN, 34, T.PAGE_MARGIN - 8, 36)
+        root.setSpacing(T.BLOCK_GAP)
         root.addLayout(page_header("CONFIGURACIÓN", "Ajustes", "Los cambios se guardan al instante."))
 
         # Atajo
@@ -1097,10 +1099,10 @@ class SettingsPage(QWidget):
     def _section(root: QVBoxLayout, glyph: str, title: str) -> QVBoxLayout:
         frame = card()
         v = QVBoxLayout(frame)
-        v.setContentsMargins(22, 16, 22, 8)
+        v.setContentsMargins(T.CARD_PAD, 20, T.CARD_PAD, 12)
         v.setSpacing(0)
         head = QHBoxLayout()
-        head.setSpacing(10)
+        head.setSpacing(12)
         head.addWidget(GlyphLabel(glyph, "CYAN", 18))
         head.addWidget(label(title, "h2"))
         head.addStretch(1)
@@ -1113,10 +1115,10 @@ class SettingsPage(QWidget):
     def _row(section: QVBoxLayout, title: str, desc: str, control: QWidget, last: bool = False) -> None:
         row = QWidget()
         h = QHBoxLayout(row)
-        h.setContentsMargins(0, 12, 0, 12)
-        h.setSpacing(24)
+        h.setContentsMargins(0, 14, 0, 14)
+        h.setSpacing(26)
         text = QVBoxLayout()
-        text.setSpacing(2)
+        text.setSpacing(3)
         text.addWidget(label(title, "title"))
         if desc:
             text.addWidget(label(desc, "dim", wrap=True))
@@ -1324,18 +1326,18 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
-        sidebar.setFixedWidth(236)
+        sidebar.setFixedWidth(252)
         sv = QVBoxLayout(sidebar)
-        sv.setContentsMargins(18, 24, 18, 18)
-        sv.setSpacing(6)
+        sv.setContentsMargins(20, 26, 20, 20)
+        sv.setSpacing(8)
         brand = QHBoxLayout()
-        brand.setSpacing(10)
-        self.logo = Logo(36)
+        brand.setSpacing(12)
+        self.logo = Logo(40)
         brand.addWidget(self.logo)
         name = QLabel()
         on_restyle(name, lambda: name.setText(
             f"<span style='color:{T.ICE}'>NEON</span><span style='color:{T.TEXT}'>WHISPER</span>"))
-        name.setFont(T.display_font(14))
+        name.setFont(T.display_font(14, QFont.Weight.Bold))
         add_glow(name, blur=24, alpha=0.5)
         brand.addWidget(name)
         brand.addStretch(1)
@@ -1369,8 +1371,8 @@ class MainWindow(QMainWindow):
 
         status = card()
         st = QHBoxLayout(status)
-        st.setContentsMargins(12, 12, 12, 12)
-        st.setSpacing(8)
+        st.setContentsMargins(16, 14, 16, 14)
+        st.setSpacing(10)
         self.dot = StatusDot()
         st.addWidget(self.dot, 0, Qt.AlignmentFlag.AlignTop)
         texts = QVBoxLayout()

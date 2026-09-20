@@ -208,11 +208,24 @@ class CardFlow(QLayout):
         return rows * row_h + (rows - 1) * gap
 
 
-def card(glow: bool = False) -> QFrame:
+def add_shadow(widget: QWidget, blur: int = 26, dy: int = 6, alpha: float = 0.28) -> None:
+    """Sombra suave debajo de una tarjeta, para que se despegue del fondo sin verse dura."""
+    effect = QGraphicsDropShadowEffect(widget)
+    effect.setBlurRadius(blur)
+    effect.setOffset(0, dy)
+    widget.setGraphicsEffect(effect)
+    # En los temas claros la sombra es gris tenue; en los oscuros, negro casi puro.
+    on_restyle(widget, lambda: effect.setColor(
+        T.qc("#000000", alpha if T.THEME.dark else alpha * 0.45)))
+
+
+def card(glow: bool = False, shadow: bool = True) -> QFrame:
     frame = QFrame()
     frame.setObjectName("Card")
     if glow:
         frame.setProperty("glow", "true")
+    if shadow:
+        add_shadow(frame)
     return frame
 
 
