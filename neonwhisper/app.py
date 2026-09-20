@@ -2,6 +2,7 @@
 import ctypes
 import logging
 import math
+import os
 import re
 import sys
 from datetime import datetime
@@ -995,4 +996,10 @@ def main() -> None:
 
     server.newConnection.connect(on_connection)
     log.info("NeonWhisper iniciado")
-    sys.exit(app.exec())
+    code = app.exec()
+    # Salida inmediata a propósito. Al cerrar, Windows desmonta las librerías de audio (WASAPI/COM,
+    # PortAudio, CUDA) en un orden que a veces revienta el proceso con un error nativo feo, aunque
+    # todo el trabajo ya esté guardado: ajustes, historial y .wav se escriben al momento. Esto se
+    # salta ese desmontaje, así que el usuario nunca ve el aviso de «dejó de funcionar».
+    logging.shutdown()
+    os._exit(code)

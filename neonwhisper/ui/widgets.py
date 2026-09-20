@@ -124,12 +124,14 @@ def glyph_icon(glyph: str, color: str | None = None, hover: str | None = None, c
 
 
 def add_glow(widget: QWidget, color: str | None = None, blur: int = 26, alpha: float = 0.55) -> None:
+    """Halo de color detrás de un texto. En los temas claros no se usa: ensucia en vez de lucir."""
     effect = QGraphicsDropShadowEffect(widget)
     effect.setBlurRadius(blur)
     effect.setOffset(0, 0)
     widget.setGraphicsEffect(effect)
     on_restyle(widget, lambda: (effect.setBlurRadius(round(blur * max(0.5, T.GLOW))),
-                                effect.setColor(T.qc(color or T.CYAN, alpha * T.GLOW))))
+                                effect.setColor(T.qc(color or T.CYAN,
+                                                     alpha * T.GLOW if T.THEME.dark else 0.0))))
 
 
 def set_glyph_icon(button: QAbstractButton, factory: Callable[[], QIcon]) -> None:
@@ -232,15 +234,28 @@ class CardFlow(QLayout):
         return rows * row_h + (rows - 1) * gap + m.top() + m.bottom()
 
 
-def add_shadow(widget: QWidget, blur: int = 26, dy: int = 6, alpha: float = 0.28) -> None:
-    """Sombra suave debajo de una tarjeta, para que se despegue del fondo sin verse dura."""
+def add_shadow(widget: QWidget, blur: int = 18, dy: int = 4, alpha: float = 0.05,
+               accent: bool = False) -> QGraphicsDropShadowEffect:
+    """Sombra suave debajo de una tarjeta o un botón, para despegarla del fondo sin verse dura."""
     effect = QGraphicsDropShadowEffect(widget)
     effect.setBlurRadius(blur)
     effect.setOffset(0, dy)
     widget.setGraphicsEffect(effect)
-    # En los temas claros la sombra es gris tenue; en los oscuros, negro casi puro.
+    # Misma geometría en todos los temas; sobre fondo oscuro hay que cargar más la tinta.
     on_restyle(widget, lambda: effect.setColor(
-        T.qc("#000000", alpha if T.THEME.dark else alpha * 0.45)))
+        T.qc(T.CYAN if accent else "#000000", alpha * (1.6 if T.THEME.dark else 1.0))))
+    return effect
+
+
+def lift_on_hover(widget: QWidget, effect: QGraphicsDropShadowEffect) -> None:
+    """Al pasar el ratón, la tarjeta solo levanta la sombra: nada de saltos ni cambios de color."""
+    def shadow(hover: bool) -> None:
+        effect.setBlurRadius(24 if hover else 18)
+        effect.setOffset(0, 6 if hover else 4)
+        effect.setColor(T.qc("#000000", (0.08 if hover else 0.05) * (1.6 if T.THEME.dark else 1.0)))
+
+    widget.enterEvent = lambda _e: shadow(True)
+    widget.leaveEvent = lambda _e: shadow(False)
 
 
 def card(glow: bool = False, shadow: bool = True) -> QFrame:
@@ -291,6 +306,7 @@ class ClickCard(QFrame):
         self.setObjectName(name)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        lift_on_hover(self, add_shadow(self))
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
@@ -309,34 +325,39 @@ class Logo(QWidget):
 
 
 class StatusDot(QWidget):
-    def __init__(self, size: int = 10):
+    """Núcleo, anillo y halo planos. Respira solo cuando algo está pasando."""
+
+    def __init__(self, size: int = 8):
         super().__init__()
-        self.setFixedSize(size + 12, size + 12)
+        self.setFixedSize(26, 26)
         self._size = size
         self.state = "loading"
-        self._timer = QTimer(self, interval=50, timeout=self.update)
+        self._timer = QTimer(self, interval=50, timeout=self._tick)
         self._timer.start()
 
     def _color(self) -> str:
         return {"ready": T.OK, "error": T.DANGER, "loading": T.BLUE,
                 "downloading": T.BLUE, "recording": T.REC}.get(self.state, T.MUTED)
 
+    def _alive(self) -> bool:
+        return self.state in ("loading", "downloading", "recording")
+
+    def _tick(self) -> None:
+        if self._alive():  # en reposo no hay nada que animar
+            self.update()
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         color = self._color()
         c = QPointF(self.width() / 2, self.height() / 2)
-        pulse = 0.5 + 0.5 * math.sin(time.monotonic() * (6 if self.state == "recording" else 3))
-        if self.state in ("loading", "downloading", "recording"):
-            glow_alpha = 0.15 + 0.35 * pulse
-        else:
-            glow_alpha = 0.3
-        g = QRadialGradient(c, self.width() / 2)
-        g.setColorAt(0, T.qc(color, glow_alpha))
-        g.setColorAt(1, T.qc(color, 0))
+        phase = 0.5 + 0.5 * math.sin(time.monotonic() * 2 * math.pi * 1.1) if self._alive() else 0.5
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(g)
-        p.drawEllipse(c, self.width() / 2, self.width() / 2)
+        p.setBrush(T.qc(color, 0.14 + 0.14 * phase))
+        halo = 9.6 + 1.5 * phase
+        p.drawEllipse(c, halo, halo)
+        p.setBrush(T.qc(color, 0.26))
+        p.drawEllipse(c, 6.8, 6.8)
         p.setBrush(QColor(color))
         p.drawEllipse(c, self._size / 2, self._size / 2)
 
@@ -393,7 +414,7 @@ class MicOrb(QWidget):
             "processing": 0.26 + 0.06 * math.sin(t * 5),
             "disabled": 0.05,
         }[self.state] + (0.06 if self._hover and not disabled else 0)
-        glow *= 0.55 + 0.45 * T.GLOW  # en los temas claros el aura tiene que ser un susurro
+        glow *= T.GLOW  # en los temas claros el aura tiene que ser un susurro
         g = QRadialGradient(c, half)
         g.setColorAt(0.42, T.qc(T.CYAN, min(glow, 0.9)))
         g.setColorAt(0.72, T.qc(T.BLUE, min(glow, 0.9) * 0.3))
@@ -403,20 +424,20 @@ class MicOrb(QWidget):
         p.drawEllipse(c, half, half)
 
         if rec:
-            for k in range(3):
-                ph = (t * 0.65 + k / 3) % 1.0
+            for k, ring_alpha in enumerate((0.30, 0.16)):  # dos anillos que respiran, no tres
+                ph = (t * 0.65 + k / 2) % 1.0
                 rr = R * (1.12 + ph * 0.7) + lvl * R * 0.12
-                p.setPen(QPen(T.qc(T.CYAN, (1 - ph) * 0.5), 1.6))
+                p.setPen(QPen(T.qc(T.CYAN, (1 - ph) * ring_alpha * 2), 1.8))
                 p.setBrush(Qt.BrushStyle.NoBrush)
                 p.drawEllipse(c, rr, rr)
-            ticks = 90
+            ticks = 64
             for i in range(ticks):
                 ang = i / ticks * math.tau
                 noise = 0.55 + 0.45 * math.sin(i * 1.9 + t * 11) * math.sin(i * 0.7 - t * 4)
                 length = R * 0.04 + R * 0.34 * lvl * max(0.15, noise)
                 inner = R * 1.1
                 col = T.qc(T.ICE if i % 2 else T.CYAN, 0.35 + 0.6 * lvl)
-                p.setPen(QPen(col, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                p.setPen(QPen(col, 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
                 p.drawLine(
                     QPointF(c.x() + math.cos(ang) * inner, c.y() + math.sin(ang) * inner),
                     QPointF(c.x() + math.cos(ang) * (inner + length), c.y() + math.sin(ang) * (inner + length)),
@@ -436,7 +457,7 @@ class MicOrb(QWidget):
         ring.setColorAt(0.66, QColor(T.INDIGO))
         ring.setColorAt(1.0, QColor(T.CYAN))
         p.setBrush(core)
-        p.setPen(QPen(QBrush(ring), 2.6) if not disabled else QPen(QColor(T.LINE_HI), 2))
+        p.setPen(QPen(QBrush(ring), 3.0) if not disabled else QPen(QColor(T.LINE_HI), 2))
         p.drawEllipse(c, R, R)
 
         if proc:
@@ -469,8 +490,8 @@ class WaveBars(QWidget):
         super().__init__()
         self.level_source = level_source
         self.mode = "idle"  # idle | recording | processing
-        self.stops: tuple[tuple[float, str], ...] | None = None  # None = degradado del tema
-        self.bar_w, self.gap = 4.0, 3.0
+        self.stops: tuple[tuple[float, str], ...] | None = None  # None = color plano del tema
+        self.bar_w, self.gap = 5.0, 4.0
         self.setMinimumHeight(height)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._history: deque[float] = deque([0.0] * 160, maxlen=160)
@@ -504,25 +525,33 @@ class WaveBars(QWidget):
         values = list(self._history)[-n:]
         values = [0.0] * (n - len(values)) + values
 
-        grad = QLinearGradient(0, 0, w, 0)
-        for pos, color in self.stops or ((0, T.BLUE), (0.6, T.CYAN), (1, T.ICE)):
-            grad.setColorAt(pos, QColor(color))
+        # Con `stops` (la barra flotante) manda la paleta del diseño; si no, color plano del tema
+        # y lo único que cambia es la transparencia: se lee mejor y no ensucia en los temas claros.
+        if self.stops:
+            grad = QLinearGradient(0, 0, w, 0)
+            for pos, color in self.stops:
+                grad.setColorAt(pos, QColor(color))
+            brush = QBrush(grad)
+        else:
+            brush = QBrush(QColor(T.CYAN))
         p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(brush)
         mid = h / 2
+        top = (h - 4) * 0.78  # altura máxima de una barra
         for i in range(n):
             if self.mode == "recording":
                 v = values[i]
-                alpha = 0.3 + 0.7 * (i / max(1, n - 1))
+                alpha = 0.55 + 0.45 * (i / max(1, n - 1))
             elif self.mode == "processing":
-                v = 0.18 + 0.22 * (0.5 + 0.5 * math.sin(t * 7 - i * 0.28))
-                alpha = 0.35 + 0.5 * (0.5 + 0.5 * math.sin(t * 7 - i * 0.28))
+                wave = 0.5 + 0.5 * math.sin(t * 7 - i * 0.28)
+                v = 0.18 + 0.22 * wave
+                alpha = 0.40 + 0.45 * wave
             else:
-                v = 0.03 + 0.03 * (0.5 + 0.5 * math.sin(t * 1.5 + i * 0.25))
-                alpha = 0.35
-            bh = max(bw, v * (h - 4))
+                v = 0.0
+                alpha = 0.22
+            bh = max(bw, v * top)  # en reposo quedan puntitos: es parte de la gracia
             x = x0 + i * (bw + gap)
             p.setOpacity(alpha)
-            p.setBrush(QBrush(grad))
             p.drawRoundedRect(QRectF(x, mid - bh / 2, bw, bh), bw / 2, bw / 2)
         p.setOpacity(1.0)
 
@@ -621,7 +650,7 @@ class ToggleSwitch(QAbstractButton):
         self.toggled.connect(self._animate)
 
     def sizeHint(self) -> QSize:
-        return QSize(46, 26)
+        return QSize(46, 26)  # con el botoncito de 18 px que pide el informe
 
     def _set_pos(self, v):
         self._pos = float(v)
@@ -652,13 +681,13 @@ class ToggleSwitch(QAbstractButton):
             p.setBrush(QBrush(grad))
             p.drawPath(track)
             p.setOpacity(1)
-        d = r.height() - 6
+        d = 18.0
         x = r.left() + 3 + self._pos * (r.width() - d - 6)
         p.setPen(Qt.PenStyle.NoPen)
         # El botoncito va sobre el relleno de color: en los temas claros el que resalta es el blanco.
         knob = (T.ICE if T.THEME.dark else T.ON_ACCENT) if self.isChecked() else T.MUTED
         p.setBrush(QColor(knob))
-        p.drawEllipse(QRectF(x, r.top() + 3, d, d))
+        p.drawEllipse(QRectF(x, r.center().y() - d / 2, d, d))
 
 
 class KeyCaps(QWidget):

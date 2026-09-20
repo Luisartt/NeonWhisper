@@ -21,8 +21,8 @@ from neonwhisper.summarizer import TEMPLATES
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.widgets import (
     CardFlow, ClickCard, ElidedLabel, GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot,
-    ThemeCard, ToggleSwitch, WaveBars, add_glow, card, glyph_icon, label, make_app_icon, on_restyle, repolish,
-    restyle, set_glyph_icon, set_tone,
+    ThemeCard, ToggleSwitch, WaveBars, add_glow, add_shadow, card, glyph_icon, label, make_app_icon, on_restyle,
+    repolish, restyle, set_glyph_icon, set_tone,
 )
 from neonwhisper.ui.overlay_styles import STYLES
 
@@ -99,6 +99,13 @@ def icon_button(glyph: str, text: str = "", variant: str | None = None, tooltip:
         btn.setProperty("variant", variant)
     if tooltip:
         btn.setToolTip(tooltip)
+    if not text:  # solo el ícono: cuadrado de 34, que es lo mínimo cómodo para el ratón
+        btn.setFixedSize(34, 34)
+    elif variant == "primary":
+        btn.setMinimumHeight(40)
+        add_shadow(btn, blur=14, dy=3, alpha=0.18, accent=True)
+    else:
+        btn.setMinimumHeight(36)
     return btn
 
 
@@ -239,8 +246,8 @@ class HomePage(QWidget):
         self._last = ""
         inner = QWidget()
         root = QVBoxLayout(inner)
-        root.setContentsMargins(T.PAGE_MARGIN, 30, T.PAGE_MARGIN - 8, 28)
-        root.setSpacing(T.BLOCK_GAP)
+        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN - 8, T.PAGE_BOTTOM)
+        root.setSpacing(T.SECTION_GAP)
         root.addLayout(page_header(
             "TODO EN TU PC · WHISPER",
             "Tu panel",
@@ -248,7 +255,7 @@ class HomePage(QWidget):
         ))
 
         hero = QHBoxLayout()
-        hero.setSpacing(T.BLOCK_GAP)
+        hero.setSpacing(T.CARD_GAP)
         root.addLayout(hero)
         hero.addWidget(self._dictation_card(), 5)
         hero.addLayout(self._side_column(), 4)
@@ -256,7 +263,7 @@ class HomePage(QWidget):
 
         # Tarjetas clicables: cada una lleva a su pestaña.
         panels_host = QWidget()
-        panels = CardFlow(250, T.BLOCK_GAP, panels_host)
+        panels = CardFlow(250, T.CARD_GAP, panels_host)
         panels.setContentsMargins(0, 0, 0, 10)  # aire para la sombra de la última fila
         self.meetings_card = PanelCard(T.Glyph.MEETING, "Reuniones", "VER TODAS  ›", lambda: self._go(2))
         self.notes_card = PanelCard(T.Glyph.PASTE, "Tus notas", "ABRIR  ›", lambda: self._go(2))
@@ -275,6 +282,7 @@ class HomePage(QWidget):
     def _dictation_card(self) -> QFrame:
         ctl = self.ctl
         mic_card = card(glow=True)
+        mic_card.setObjectName("Hero")  # radio más generoso que el resto de tarjetas
         mic = QVBoxLayout(mic_card)
         mic.setContentsMargins(T.CARD_PAD, 16, T.CARD_PAD, 18)
         mic.setSpacing(8)
@@ -299,6 +307,7 @@ class HomePage(QWidget):
         self.dictate_btn.setProperty("variant", "hero")
         self.dictate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.dictate_btn.clicked.connect(ctl.toggle_recording)
+        add_shadow(self.dictate_btn, blur=14, dy=3, alpha=0.18, accent=True)
         # Los stretch dejan el orbe centrado y el botón siempre abajo, sin huecos raros en medio.
         mic.addStretch(1)
         mic.addWidget(self.orb)
@@ -313,7 +322,7 @@ class HomePage(QWidget):
 
     def _side_column(self) -> QVBoxLayout:
         side = QVBoxLayout()
-        side.setSpacing(T.BLOCK_GAP)
+        side.setSpacing(T.CARD_GAP)
 
         meeting_card = card()
         mv = QVBoxLayout(meeting_card)
@@ -336,7 +345,7 @@ class HomePage(QWidget):
 
         last = card()
         lv = QVBoxLayout(last)
-        lv.setContentsMargins(T.CARD_PAD, 18, T.CARD_PAD, 18)
+        lv.setContentsMargins(T.CARD_PAD, 20, T.CARD_PAD, 20)
         lv.setSpacing(10)
         top = QHBoxLayout()
         top.addWidget(label("ÚLTIMA TRANSCRIPCIÓN", "eyebrow"))
@@ -356,7 +365,7 @@ class HomePage(QWidget):
 
     def _stats_row(self) -> QWidget:
         host = QWidget()
-        tiles = CardFlow(138, 14, host)
+        tiles = CardFlow(138, T.CARD_GAP, host)
         tiles.setContentsMargins(0, 0, 0, 8)  # aire para la sombra
         self.tiles: dict[str, QLabel] = {}
         for key, title in (("dictados", "DICTADOS"), ("palabras", "PALABRAS"),
@@ -483,8 +492,8 @@ class HistoryPage(QWidget):
         super().__init__()
         self.ctl = ctl
         root = QVBoxLayout(self)
-        root.setContentsMargins(T.PAGE_MARGIN, 34, T.PAGE_MARGIN, 24)
-        root.setSpacing(T.BLOCK_GAP)
+        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN, T.PAGE_BOTTOM)
+        root.setSpacing(T.SECTION_GAP)
 
         head = QHBoxLayout()
         head.setSpacing(12)
@@ -509,7 +518,7 @@ class HistoryPage(QWidget):
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
         self.list_layout.setContentsMargins(0, 2, 10, 6)
-        self.list_layout.setSpacing(12)
+        self.list_layout.setSpacing(T.CARD_GAP)
         root.addWidget(scrollable(self.list_host), 1)
         self.refresh()
 
@@ -681,8 +690,8 @@ class MeetingsPage(QWidget):
         self.ctl = ctl
         self.cards: dict[int, MeetingCard] = {}
         root = QVBoxLayout(self)
-        root.setContentsMargins(T.PAGE_MARGIN, 34, T.PAGE_MARGIN, 24)
-        root.setSpacing(T.BLOCK_GAP)
+        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN, T.PAGE_BOTTOM)
+        root.setSpacing(T.SECTION_GAP)
 
         head = QHBoxLayout()
         head.setSpacing(12)
@@ -698,7 +707,7 @@ class MeetingsPage(QWidget):
         # Tarjeta de la reunión en curso.
         self.live = card(glow=True)
         live_box = QVBoxLayout(self.live)
-        live_box.setContentsMargins(T.CARD_PAD, 18, T.CARD_PAD, 18)
+        live_box.setContentsMargins(T.CARD_PAD, 20, T.CARD_PAD, 20)
         live_box.setSpacing(14)
         live_row = QWidget()
         live = QHBoxLayout(live_row)
@@ -770,7 +779,7 @@ class MeetingsPage(QWidget):
         # Preguntar a tus reuniones, con el modelo local.
         self.ask_card = card()
         ask_box = QVBoxLayout(self.ask_card)
-        ask_box.setContentsMargins(T.CARD_PAD, 18, T.CARD_PAD, 18)
+        ask_box.setContentsMargins(T.CARD_PAD, 20, T.CARD_PAD, 20)
         ask_box.setSpacing(10)
         ask_row = QHBoxLayout()
         ask_row.setSpacing(10)
@@ -800,7 +809,7 @@ class MeetingsPage(QWidget):
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
         self.list_layout.setContentsMargins(0, 2, 10, 6)
-        self.list_layout.setSpacing(12)
+        self.list_layout.setSpacing(T.CARD_GAP)
         root.addWidget(scrollable(self.list_host), 1)
         self.refresh()
 
@@ -995,8 +1004,8 @@ class SettingsPage(QWidget):
         s = ctl.settings
         inner = QWidget()
         root = QVBoxLayout(inner)
-        root.setContentsMargins(T.PAGE_MARGIN, 34, T.PAGE_MARGIN - 8, 36)
-        root.setSpacing(T.BLOCK_GAP)
+        root.setContentsMargins(T.PAGE_MARGIN, T.PAGE_TOP, T.PAGE_MARGIN - 8, T.PAGE_BOTTOM + 12)
+        root.setSpacing(T.SECTION_GAP)
         root.addLayout(page_header("CONFIGURACIÓN", "Ajustes", "Los cambios se guardan al instante."))
 
         # Atajo
@@ -1505,9 +1514,9 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
-        sidebar.setFixedWidth(252)
+        sidebar.setFixedWidth(224)
         sv = QVBoxLayout(sidebar)
-        sv.setContentsMargins(20, 26, 20, 20)
+        sv.setContentsMargins(14, 24, 14, 16)
         sv.setSpacing(8)
         brand = QHBoxLayout()
         brand.setSpacing(12)
