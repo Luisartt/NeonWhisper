@@ -126,6 +126,31 @@ class MeetingStore:
             self._db.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
             self._db.commit()
 
+    def delete_many(self, ids) -> list[str]:
+        """Borra varias reuniones de un golpe y devuelve el audio que quedó huérfano.
+
+        Devuelve las rutas para que quien llama borre los .wav: el almacén no toca el disco.
+        Va en una sola transacción, así que o se borran todas o no se borra ninguna.
+        """
+        ids = [int(i) for i in ids]
+        if not ids:
+            return []
+        marks = ", ".join("?" * len(ids))
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT audio_path FROM meetings WHERE id IN ({marks})", ids).fetchall()
+            self._db.execute(f"DELETE FROM meetings WHERE id IN ({marks})", ids)
+            self._db.commit()
+        return [r[0] for r in rows if r[0]]
+
+    def clear(self) -> list[str]:
+        """Borra todas las reuniones. Devuelve el audio que quedó huérfano."""
+        with self._lock:
+            rows = self._db.execute("SELECT audio_path FROM meetings").fetchall()
+            self._db.execute("DELETE FROM meetings")
+            self._db.commit()
+        return [r[0] for r in rows if r[0]]
+
     def stats(self) -> tuple[int, float]:
         """(reuniones grabadas, horas totales)."""
         with self._lock:
