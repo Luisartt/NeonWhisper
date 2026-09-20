@@ -26,7 +26,7 @@ WS_EX_TOPMOST = 0x00000008
 MARGIN = 16          # espacio para la sombra alrededor de la tarjeta
 CARD_W = 400         # ancho de la tarjeta
 CARD_H = 80          # alto con una línea de título y otra de detalle
-CARD_H_REC = 112     # alto mientras graba: cabe además la sonda de sonido
+CARD_H_REC = 120     # alto mientras graba: cabe además la sonda de sonido
 RADIUS = T.R_CARD    # el mismo redondeo que las tarjetas de la ventana
 PAD_V = 20           # relleno arriba y abajo de la tarjeta
 DOT_X = 24           # centro del punto de estado, medido desde el borde de la tarjeta
@@ -75,10 +75,10 @@ class _SoundProbe(QWidget):
     audio del sistema lleva unos segundos en cero, su barra se pone gris y el aviso lo dice.
     """
 
-    LABEL_W = 64
+    LABEL_W = 72   # «Los demás» mide 59 px a 9 pt; el texto se dibuja en LABEL_W - 8
     BAR_W = 120
     BAR_H = 4
-    ROW_H = 12
+    ROW_H = 16     # el alto de un renglón de 9 pt
 
     def __init__(self, mic_level, system_level):
         super().__init__()
@@ -113,13 +113,15 @@ class _SoundProbe(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        font = T.display_font(7.5)
-        p.setFont(font)
+        # 9 pt es el mínimo de la app: a 7.5 esto era el texto más pequeño de todo NeonWhisper.
+        p.setFont(T.display_font(9))
         quiet = self.system_quiet
         rows = (("Tú", self._mic, T.CYAN, False), ("Los demás", self._sys, T.BLUE, quiet))
         for i, (name, value, color, off) in enumerate(rows):
             y = i * (self.ROW_H + 4)
-            p.setPen(QColor(T.DIM if off else T.MUTED))
+            # Apagado, quien se pone gris es la barra, no la etiqueta: justo cuando hay que leer
+            # que algo va mal, el texto no puede bajar de contraste.
+            p.setPen(QColor(T.MUTED))
             p.drawText(QRectF(0, y, self.LABEL_W - 8, self.ROW_H),
                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, name)
             track = QRectF(self.LABEL_W, y + (self.ROW_H - self.BAR_H) / 2, self.BAR_W, self.BAR_H)

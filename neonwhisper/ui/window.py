@@ -1,4 +1,5 @@
 """Ventana principal: Inicio, Historial y Ajustes."""
+import html
 import os
 import webbrowser
 from datetime import date, datetime, timedelta
@@ -50,10 +51,15 @@ ACTION_EDGE = GAP_L      # margen derecho cuando la fila termina en botones de i
 CONTROL_H = 36           # alto de un botón secundario (y lado de uno que solo lleva icono)
 WAVE_H = 36              # alto de los medidores de voz
 SLIDER_W = 200           # ancho de los deslizadores de Ajustes
+TEXT_MAX = 520           # ancho máximo de un párrafo de apoyo (~80 caracteres por renglón)
 
 # Color del estado de una reunión (en el panel de inicio y en la lista de Reuniones).
 STATE_TONES = {"grabando": "rec", "transcribiendo": "accent", "resumiendo": "accent", "lista": "ok",
                "error": "danger"}
+# «Lista» y «Error» llevan además un glifo: con daltonismo rojo-verde el verde y el rojo de las dos
+# píldoras se ven del mismo gris, y se perdía la alarma de un vistazo. El color deja de ser el único
+# que lo cuenta.
+STATE_GLYPHS = {"lista": T.Glyph.CHECK, "error": T.Glyph.CANCEL}
 
 
 class NoWheelComboBox(QComboBox):
@@ -149,6 +155,17 @@ def empty_state(glyph: str, text: str, compact: bool = False) -> QWidget:
     return host
 
 
+def paragraph(text: str = "", role: str = "muted") -> QLabel:
+    """Párrafo de apoyo, cortado en TEXT_MAX.
+
+    A lo ancho de la ventana un renglón llegaba a 128 caracteres: a partir de ~80 el ojo pierde
+    el salto de línea y el párrafo se escanea en vez de leerse.
+    """
+    lbl = label(text, role, wrap=True)
+    lbl.setMaximumWidth(TEXT_MAX)
+    return lbl
+
+
 def page_header(eyebrow: str, title: str, subtitle: str = "") -> QVBoxLayout:
     box = QVBoxLayout()
     box.setSpacing(GAP_XS)
@@ -156,8 +173,28 @@ def page_header(eyebrow: str, title: str, subtitle: str = "") -> QVBoxLayout:
     h1 = label(title, "h1")
     box.addWidget(h1)
     if subtitle:
-        box.addWidget(label(subtitle, "muted", wrap=True))
+        box.addWidget(paragraph(subtitle))
     return box
+
+
+def set_state_chip(chip: QLabel, state: str, text: str = "") -> None:
+    """Pinta la píldora de estado de una reunión: su color, su palabra y, si lo tiene, su glifo."""
+    glyph = STATE_GLYPHS.get(state)
+    shown = html.escape(text or state.capitalize())
+    if glyph:
+        # El glifo necesita la tipografía de íconos, y la píldora usa la de texto: va en un span.
+        chip.setTextFormat(Qt.TextFormat.RichText)
+        chip.setText(f"<span style=\"font-family:'{T.icon_family()}'\">{glyph}</span>&nbsp; {shown}")
+    else:
+        chip.setTextFormat(Qt.TextFormat.PlainText)
+        chip.setText(shown)
+    set_tone(chip, STATE_TONES.get(state, "muted"))
+
+
+def state_chip(state: str, text: str = "") -> QLabel:
+    chip = label("", "chip")
+    set_state_chip(chip, state, text)
+    return chip
 
 
 def icon_button(glyph: str, text: str = "", variant: str | None = None, tooltip: str = "") -> QPushButton:
@@ -251,7 +288,7 @@ def stat_tile(title: str) -> tuple[QFrame, QLabel]:
     return tile, value
 
 
-def panel_row(title: str, meta: str, state: str = "", tone: str | None = None) -> QFrame:
+def panel_row(title: str, meta: str, state: str = "") -> QFrame:
     """Una línea dentro de una tarjeta del panel: texto, datos y, si aplica, su estado."""
     row = QFrame()
     row.setObjectName("Row")
@@ -266,9 +303,7 @@ def panel_row(title: str, meta: str, state: str = "", tone: str | None = None) -
     texts.addWidget(ElidedLabel(meta, "dim"))
     h.addLayout(texts, 1)
     if state:
-        chip = label(state, "chip")
-        set_tone(chip, tone)
-        h.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
+        h.addWidget(state_chip(state), 0, Qt.AlignmentFlag.AlignVCenter)
     return row
 
 
@@ -484,8 +519,7 @@ class HomePage(QWidget):
         rows = []
         for meeting in meetings[:4]:
             meta = f"{human_date(meeting.created_at)}   ·   {fmt_minutes(meeting.duration)}"
-            rows.append(panel_row(meeting.label, meta, meeting.state.capitalize(),
-                                  STATE_TONES.get(meeting.state, "muted")))
+            rows.append(panel_row(meeting.label, meta, meeting.state))
         self.meetings_card.fill(rows, "Todavía no grabas ninguna reunión. Dale a «Grabar reunión» "
                                       "o actívalas en Ajustes.")
 
@@ -721,14 +755,13 @@ class MeetingCard(QFrame):
         meta = f"{human_date(meeting.created_at)}   ·   {minutes:.0f} min   ·   {meeting.words} palabras"
         titles.addWidget(ElidedLabel(meta, "dim"))
         if meeting.error:
-            reason = label(meeting.error, "muted", wrap=True)
+            reason = paragraph(meeting.error)
             set_tone(reason, "danger")
             titles.addWidget(reason)
         top.addLayout(titles, 1)
 
-        # La misma píldora que en el panel de inicio: un estado, un color, el mismo tamaño.
-        self.state = label(meeting.state.capitalize(), "chip")
-        set_tone(self.state, STATE_TONES.get(meeting.state, "muted"))
+        # La misma píldora que en el panel de inicio: un estado, un color, un glifo, el mismo tamaño.
+        self.state = state_chip(meeting.state)
         top.addWidget(self.state, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.toggle = icon_button(T.Glyph.HISTORY, "Ver", variant="ghost", tooltip="Resumen y transcripción")
@@ -977,7 +1010,7 @@ class MeetingsPage(QWidget):
         ask_row.addWidget(self.ask_input, 1)
         ask_row.addWidget(ask_btn)
         ask_box.addLayout(ask_row)
-        self.answer = label("", "muted", wrap=True)
+        self.answer = paragraph()
         self.answer.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.answer.hide()
         ask_box.addWidget(self.answer)
@@ -1112,8 +1145,7 @@ class MeetingsPage(QWidget):
     def set_progress(self, meeting_id: int, text: str) -> None:
         card_widget = self.cards.get(meeting_id)
         if card_widget is not None:
-            card_widget.state.setText(text)
-            set_tone(card_widget.state, "accent")
+            set_state_chip(card_widget.state, "transcribiendo", text)
 
     # --- elegir varias y borrarlas de golpe ----------------------------------
     def _set_selecting(self, on: bool) -> None:
@@ -1318,7 +1350,7 @@ class SettingsPage(QWidget):
         hl.addWidget(self.keycaps)
         hl.addWidget(self.capture_btn)
         self._row(sec, "Combinación", "Funciona en cualquier app, aunque NeonWhisper esté minimizado.", hot)
-        self.capture_msg = label("", "muted", wrap=True)
+        self.capture_msg = paragraph()
         self.capture_msg.hide()
         sec.addWidget(self.capture_msg)
         self.mode_toggle = self._segmented(
@@ -1343,9 +1375,9 @@ class SettingsPage(QWidget):
 
         # Modelos
         sec = self._section(root, T.Glyph.DOWNLOAD, "Modelos de Whisper")
-        sec.addWidget(label(
+        sec.addWidget(paragraph(
             "Large v3 Turbo es casi tan preciso como Large v3 y varias veces más rápido. "
-            "Puedes pausar una descarga y continuarla después, incluso si cierras la app.", "muted", wrap=True))
+            "Puedes pausar una descarga y continuarla después, incluso si cierras la app."))
         self.model_rows: dict[str, ModelRow] = {}
         for i, key in enumerate(MODELS):
             if i:
@@ -1408,11 +1440,11 @@ class SettingsPage(QWidget):
 
         # Reuniones
         sec = self._section(root, T.Glyph.HISTORY, "Reuniones")
-        sec.addWidget(label(
+        sec.addWidget(paragraph(
             "NeonWhisper mira si una app de reuniones (Teams, Zoom, Meet, Webex, Discord…) está usando tu "
             "micrófono. Cuando eso pasa, graba tu voz y lo que suena en tu PC, y al terminar transcribe y "
             "resume, todo en tu computadora. Avisa a los demás de que estás grabando: en muchos sitios es "
-            "obligatorio.", "muted", wrap=True))
+            "obligatorio."))
         sec.addSpacing(GAP_S)
         self._row(sec, "Grabar reuniones", "Con esto apagado, NeonWhisper no vigila nada ni graba.",
                   self._toggle(s.meetings_enabled, lambda v: ctl.update_setting("meetings_enabled", v)))
@@ -1452,7 +1484,7 @@ class SettingsPage(QWidget):
         ah.addWidget(self.meeting_test_btn)
         self._row(sec, "Probar qué se grabaría",
                   "Cinco segundos escuchando las dos fuentes: habla y deja sonando un video.", audio_host)
-        self.meeting_audio_status = label("", "muted", wrap=True)
+        self.meeting_audio_status = paragraph()
         self.meeting_audio_status.hide()
         sec.addWidget(self.meeting_audio_status)
         sec.addWidget(separator())
@@ -1480,8 +1512,8 @@ class SettingsPage(QWidget):
 
         # Apariencia
         sec = self._section(root, T.Glyph.THEME, "Apariencia")
-        sec.addWidget(label("El tema pinta toda la app: fondos, acentos, el orbe del micrófono y el ícono. "
-                            "El cambio es inmediato, no hace falta reiniciar.", "muted", wrap=True))
+        sec.addWidget(paragraph("El tema pinta toda la app: fondos, acentos, el orbe del micrófono y el "
+                                "ícono. El cambio es inmediato, no hace falta reiniciar."))
         sec.addSpacing(GAP_S)
         theme_host = QWidget()
         theme_cards = CardFlow(186, T.CARD_GAP, theme_host)
@@ -1512,8 +1544,8 @@ class SettingsPage(QWidget):
         dv.setContentsMargins(0, GAP_M, 0, GAP_M)
         dv.setSpacing(GAP_XS)
         dv.addWidget(label("Diseño", "title"))
-        dv.addWidget(label("Al cambiar cualquier opción, la barra aparece unos segundos para que veas cómo queda.",
-                           "muted", wrap=True))
+        dv.addWidget(paragraph("Al cambiar cualquier opción, la barra aparece unos segundos para que veas "
+                               "cómo queda."))
         dv.addSpacing(GAP_S)
         cards_host = QWidget()
         cards = CardFlow(186, T.CARD_GAP, cards_host)
@@ -1579,10 +1611,10 @@ class SettingsPage(QWidget):
 
         # Actualizaciones
         sec = self._section(root, T.Glyph.GLOBE, "Actualizaciones")
-        sec.addWidget(label(
+        sec.addWidget(paragraph(
             "NeonWhisper mira la rama «main» del repositorio público y compara el número de "
             "versión con el tuyo. Si lo que tienes es más nuevo que lo publicado, te dirá que "
-            "estás al día: es lo correcto, aunque de momento pueda sonar raro.", "muted", wrap=True))
+            "estás al día: es lo correcto, aunque de momento pueda sonar raro."))
         sec.addSpacing(GAP_S)
         self.updater = Updater(self)
         self.updater.checked.connect(self._on_update_checked)
@@ -1597,7 +1629,7 @@ class SettingsPage(QWidget):
         uv = QVBoxLayout(update_panel)
         uv.setContentsMargins(0, 0, 0, GAP_M)
         uv.setSpacing(GAP_M)
-        self.update_status = label("", "muted", wrap=True)
+        self.update_status = paragraph()
         uv.addWidget(self.update_status)
         self.update_actions = QWidget()
         ua = QHBoxLayout(self.update_actions)
