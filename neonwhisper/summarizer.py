@@ -14,7 +14,9 @@ import time
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from neonwhisper.paths import model_dir, model_downloaded
+from neonwhisper.paths import model_dir, model_downloaded, setup_cuda_dlls
+
+setup_cuda_dlls()  # CTranslate2 en GPU necesita las DLL de CUDA en el PATH
 
 log = logging.getLogger(__name__)
 

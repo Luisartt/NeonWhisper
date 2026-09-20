@@ -672,7 +672,7 @@ class MeetingsPage(QWidget):
         elif answer:
             text, tone = answer, "muted"
         else:
-            text, tone = f"Pensando en «{question[:60]}»…", "dim"
+            text, tone = f"Pensando en «{question[:60]}»…", "accent"
         self.answer.setText(text)
         set_tone(self.answer, tone)
         self.answer.show()
@@ -966,6 +966,11 @@ class SettingsPage(QWidget):
         self.meeting_audio_status.hide()
         sec.addWidget(self.meeting_audio_status)
         sec.addWidget(separator())
+        self._row(sec, "Duración mínima",
+                  "Las reuniones más cortas que esto se descartan (útil bajarlo para probar).",
+                  self._combo({"15": "15 segundos", "30": "30 segundos", "60": "1 minuto", "180": "3 minutos"},
+                              str(s.meeting_min_seconds),
+                              lambda v: ctl.update_setting("meeting_min_seconds", int(v))))
         self._row(sec, "Transcripción en vivo",
                   "Ir transcribiendo mientras la reunión ocurre, en la pestaña Reuniones.",
                   self._toggle(s.meeting_live_transcript,
