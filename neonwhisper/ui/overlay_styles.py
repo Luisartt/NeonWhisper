@@ -8,6 +8,7 @@ from neonwhisper.ui import theme as T
 
 # Los diseños de la barra no dependen del tema de la app: cada uno tiene su propia paleta fija.
 N = T.THEMES["neon"]
+P = T.THEMES["pastel"]
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,16 @@ STYLES: dict[str, OverlayStyle] = {
         halo=0.07, halo_color="#000000", edge="#ffffff", edge_alpha=0.16, border_accent=0.0, border_width=1.0,
         sheen=0.0, font_size=10, font_weight=QFont.Weight.Normal,
         icon="#8c8c8c", icon_hover="#ffffff", hover_bg="rgba(255,255,255,0.10)",
+    ),
+    "pastel": OverlayStyle(
+        "pastel", "Pastel", "Crema clarita con lavanda", 440, 64,
+        bg_top="#ffffff", bg_bottom="#f1ebff", bg_alpha=0.97,
+        accents={"recording": P.accent, "processing": P.blue, "ok": P.ok, "error": P.danger},
+        text={"recording": P.ice, "processing": P.ice, "ok": P.ok, "error": P.danger},
+        bars=((0, P.indigo), (0.6, P.accent), (1, P.ice)), bar_width=4.5, bar_gap=3.5,
+        halo=0.09, halo_color=P.accent, edge=P.line_hi, edge_alpha=0.95, border_accent=0.45, border_width=1.4,
+        sheen=0.0, font_size=11, font_weight=QFont.Weight.DemiBold,
+        icon=P.muted, icon_hover=P.ice, hover_bg="rgba(107,78,240,0.14)",
     ),
 }
 DEFAULT_STYLE = "neon"

@@ -58,6 +58,9 @@ class UITheme:
     orb_deep: str
     orb_off: str
     glow: float       # intensidad de los brillos (1 = neón)
+    # Los dos últimos traen valor por defecto porque los temas oscuros ya los cumplían sin decirlo.
+    dark: bool = True  # False en temas claros: el fondo de la ventana es claro
+    hi: str = "#ffffff"  # el color de mayor contraste sobre las superficies del tema (tinta en los claros)
 
 
 THEMES: dict[str, UITheme] = {
@@ -100,6 +103,19 @@ THEMES: dict[str, UITheme] = {
         orb_hi="#4a4a52", orb_hi2="#232329", orb_idle="#2b2b31", orb_mid="#141418", orb_deep="#050506",
         orb_off="#131317", glow=0.55,
     ),
+    "pastel": UITheme(
+        key="pastel", name="Pastel", description="Crema con lavanda, menta y durazno",
+        bg0="#f8f5f0", bg1="#f2eee7", bg2="#ffffff", bg3="#efeaf9",
+        line="#e7e0d6", line_hi="#d5cbe6", input_bg="#ffffff", select_bg="#ddd2fb",
+        hover_bg="#ece5fb", press_bg="#ddd3f6",
+        text="#2e2544", muted="#6b5f86", dim="#6f6389", nav_hover="#3a2f5e", on_accent="#ffffff",
+        accent="#6b4ef0", ice="#4a33b8", blue="#5b8def", indigo="#9a7bf5", danger="#c43c6a", ok="#0b7d60",
+        primary_from="#6f4ae8", primary_to="#5a34d6", primary_hover_from="#5f3ada", primary_hover_to="#4c2bc0",
+        keycap_bg="#f3eefd", keycap_edge="#b9a6ef", titlebar_border="#cabbef",
+        logo_idle="#e7defd", logo_active="#cdbaff",
+        orb_hi="#7c63e8", orb_hi2="#6247c9", orb_idle="#efe9ff", orb_mid="#e3d9ff", orb_deep="#d2c4f7",
+        orb_off="#eceaf2", glow=0.35, dark=False, hi="#241b3f",
+    ),
 }
 DEFAULT_THEME = "neon"
 THEME = THEMES[DEFAULT_THEME]
@@ -108,14 +124,14 @@ THEME = THEMES[DEFAULT_THEME]
 # --- Paleta activa ------------------------------------------------------------
 # set_theme() las reescribe; los widgets que pintan a mano las leen como T.CYAN, T.BG0, etc.
 # (los colores que solo usa la hoja de estilos se leen del tema: THEME.input_bg, THEME.keycap_bg…)
-BG0 = BG1 = BG2 = BG3 = LINE = LINE_HI = TEXT = MUTED = DIM = ON_ACCENT = ""
+BG0 = BG1 = BG2 = BG3 = LINE = LINE_HI = TEXT = MUTED = DIM = ON_ACCENT = HI = ""
 CYAN = ICE = BLUE = INDIGO = DANGER = OK = ""
 LOGO_IDLE = LOGO_ACTIVE = ORB_HI = ORB_HI2 = ORB_IDLE = ORB_MID = ORB_DEEP = ORB_OFF = ""
 GLOW = 1.0
 
 _ALIASES = {
     "BG0": "bg0", "BG1": "bg1", "BG2": "bg2", "BG3": "bg3", "LINE": "line", "LINE_HI": "line_hi",
-    "TEXT": "text", "MUTED": "muted", "DIM": "dim", "ON_ACCENT": "on_accent",
+    "TEXT": "text", "MUTED": "muted", "DIM": "dim", "ON_ACCENT": "on_accent", "HI": "hi",
     "CYAN": "accent", "ICE": "ice", "BLUE": "blue", "INDIGO": "indigo", "DANGER": "danger", "OK": "ok",
     "LOGO_IDLE": "logo_idle", "LOGO_ACTIVE": "logo_active",
     "ORB_HI": "orb_hi", "ORB_HI2": "orb_hi2", "ORB_IDLE": "orb_idle", "ORB_MID": "orb_mid",
@@ -316,8 +332,8 @@ QMessageBox {{ background: {t.bg1}; }}
 """
 
 
-def apply_dark_titlebar(hwnd: int) -> None:
-    """Barra de título oscura con borde del tema (Windows 11; en Windows 10 solo modo oscuro)."""
+def apply_titlebar(hwnd: int) -> None:
+    """Barra de título con los colores del tema (Windows 11; en Windows 10 solo claro u oscuro)."""
     if sys.platform != "win32":
         return
     dwm = ctypes.windll.dwmapi
@@ -330,7 +346,7 @@ def apply_dark_titlebar(hwnd: int) -> None:
         c = QColor(hex_color)
         return c.red() | (c.green() << 8) | (c.blue() << 16)
 
-    set_attr(20, 1)                            # DWMWA_USE_IMMERSIVE_DARK_MODE
+    set_attr(20, 1 if THEME.dark else 0)       # DWMWA_USE_IMMERSIVE_DARK_MODE
     set_attr(35, colorref(THEME.bg1))          # DWMWA_CAPTION_COLOR
     set_attr(34, colorref(THEME.titlebar_border))  # DWMWA_BORDER_COLOR
     set_attr(36, colorref(THEME.ice))          # DWMWA_TEXT_COLOR

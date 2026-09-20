@@ -4,13 +4,15 @@ import time
 from collections import deque
 from collections.abc import Callable
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import (
+    QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal,
+)
 from PySide6.QtGui import (
     QBrush, QColor, QConicalGradient, QCursor, QFont, QFontMetrics, QIcon, QLinearGradient, QPainter, QPainterPath,
     QPen, QPixmap, QRadialGradient,
 )
 from PySide6.QtWidgets import (
-    QAbstractButton, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QSizePolicy, QWidget,
+    QAbstractButton, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLayout, QSizePolicy, QWidget,
 )
 
 from neonwhisper.hotkeys import pretty_parts
@@ -62,7 +64,7 @@ def paint_logo(p: QPainter, rect: QRectF, active: bool = False) -> None:
     bw, gap = s * 0.085, s * 0.055
     x0 = rect.center().x() - (len(heights) * bw + (len(heights) - 1) * gap) / 2
     grad = QLinearGradient(0, rect.top() + s * 0.2, 0, rect.bottom() - s * 0.2)
-    grad.setColorAt(0, QColor("#ffffff" if active else T.ICE))
+    grad.setColorAt(0, QColor(T.HI if active else T.ICE))
     grad.setColorAt(0.5, QColor(T.CYAN))
     grad.setColorAt(1, QColor(T.BLUE))
     p.setPen(Qt.PenStyle.NoPen)
@@ -140,6 +142,70 @@ def label(text: str = "", role: str | None = None, wrap: bool = False) -> QLabel
         lbl.setProperty("role", role)
     lbl.setWordWrap(wrap)
     return lbl
+
+
+class CardFlow(QLayout):
+    """Tarjetas del mismo ancho que bajan a la siguiente fila cuando ya no caben.
+
+    Existe porque en la ventana angosta (960 px) una fila de cuatro tarjetas se aplastaba y el
+    contenido se salía; así se reacomodan solas en dos filas y crecen al ensanchar la ventana.
+    """
+
+    def __init__(self, min_width: int = 180, spacing: int = 12, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._items: list = []
+        self._min_w = min_width
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(spacing)
+
+    # --- lo que QLayout necesita ---------------------------------------------
+    def addItem(self, item) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self) -> Qt.Orientation:
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._arrange(QRect(0, 0, width, 0), place=False)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._arrange(rect, place=True)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        height = max((i.sizeHint().height() for i in self._items), default=0)
+        return QSize(self._min_w, height)
+
+    # --- acomodo --------------------------------------------------------------
+    def _arrange(self, rect: QRect, place: bool) -> int:
+        if not self._items:
+            return 0
+        gap = self.spacing()
+        cols = max(1, min(len(self._items), (rect.width() + gap) // (self._min_w + gap)))
+        item_w = (rect.width() - (cols - 1) * gap) / cols
+        row_h = max(i.sizeHint().height() for i in self._items)
+        rows = -(-len(self._items) // cols)
+        if place:
+            for index, item in enumerate(self._items):
+                x = rect.x() + (index % cols) * (item_w + gap)
+                y = rect.y() + (index // cols) * (row_h + gap)
+                item.setGeometry(QRect(QPoint(round(x), round(y)), QSize(round(item_w), row_h)))
+        return rows * row_h + (rows - 1) * gap
 
 
 def card(glow: bool = False) -> QFrame:
@@ -246,6 +312,7 @@ class MicOrb(QWidget):
             "processing": 0.26 + 0.06 * math.sin(t * 5),
             "disabled": 0.05,
         }[self.state] + (0.06 if self._hover and not disabled else 0)
+        glow *= 0.55 + 0.45 * T.GLOW  # en los temas claros el aura tiene que ser un susurro
         g = QRadialGradient(c, half)
         g.setColorAt(0.42, T.qc(T.CYAN, min(glow, 0.9)))
         g.setColorAt(0.72, T.qc(T.BLUE, min(glow, 0.9) * 0.3))
@@ -310,7 +377,7 @@ class MicOrb(QWidget):
             f = QFont(T.icon_family())
             f.setPixelSize(int(R * 0.72))
             p.setFont(f)
-            p.setPen(QColor(T.DIM if disabled else (T.ICE if not self._hover else "#ffffff")))
+            p.setPen(QColor(T.DIM if disabled else (T.ICE if not self._hover else T.HI)))
             p.drawText(QRectF(c.x() - R, c.y() - R, 2 * R, 2 * R), Qt.AlignmentFlag.AlignCenter, T.Glyph.MIC)
 
 
@@ -506,7 +573,9 @@ class ToggleSwitch(QAbstractButton):
         d = r.height() - 6
         x = r.left() + 3 + self._pos * (r.width() - d - 6)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(T.ICE) if self.isChecked() else QColor(T.MUTED))
+        # El botoncito va sobre el relleno de color: en los temas claros el que resalta es el blanco.
+        knob = (T.ICE if T.THEME.dark else T.ON_ACCENT) if self.isChecked() else T.MUTED
+        p.setBrush(QColor(knob))
         p.drawEllipse(QRectF(x, r.top() + 3, d, d))
 
 

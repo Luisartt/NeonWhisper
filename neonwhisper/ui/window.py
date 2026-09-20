@@ -20,8 +20,9 @@ from neonwhisper.paths import DATA_DIR, MODELS_DIR
 from neonwhisper.summarizer import TEMPLATES
 from neonwhisper.ui import theme as T
 from neonwhisper.ui.widgets import (
-    GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot, ThemeCard, ToggleSwitch, WaveBars,
-    add_glow, card, glyph_icon, label, make_app_icon, on_restyle, repolish, restyle, set_glyph_icon, set_tone,
+    CardFlow, GlyphLabel, KeyCaps, Logo, MicOrb, NeonProgress, OverlayStyleCard, StatusDot, ThemeCard, ToggleSwitch,
+    WaveBars, add_glow, card, glyph_icon, label, make_app_icon, on_restyle, repolish, restyle, set_glyph_icon,
+    set_tone,
 )
 from neonwhisper.ui.overlay_styles import STYLES
 
@@ -993,8 +994,8 @@ class SettingsPage(QWidget):
         sec.addWidget(label("El tema pinta toda la app: fondos, acentos, el orbe del micrófono y el ícono. "
                             "El cambio es inmediato, no hace falta reiniciar.", "dim", wrap=True))
         sec.addSpacing(10)
-        theme_cards = QHBoxLayout()
-        theme_cards.setSpacing(12)
+        theme_host = QWidget()
+        theme_cards = CardFlow(186, 12, theme_host)
         self.theme_group = QButtonGroup(self)
         self.theme_cards: dict[str, ThemeCard] = {}
         for key in T.THEMES:
@@ -1004,7 +1005,7 @@ class SettingsPage(QWidget):
             self.theme_group.addButton(c)
             self.theme_cards[key] = c
             theme_cards.addWidget(c)
-        sec.addLayout(theme_cards)
+        sec.addWidget(theme_host)
         sec.addSpacing(14)
         sec.addWidget(separator())
         self._row(sec, "Barra flotante a juego",
@@ -1025,8 +1026,8 @@ class SettingsPage(QWidget):
         dv.addWidget(label("Al cambiar cualquier opción, la barra aparece unos segundos para que veas cómo queda.", "dim",
                            wrap=True))
         dv.addSpacing(8)
-        cards = QHBoxLayout()
-        cards.setSpacing(12)
+        cards_host = QWidget()
+        cards = CardFlow(186, 12, cards_host)
         self.style_group = QButtonGroup(self)
         self.style_cards: dict[str, OverlayStyleCard] = {}
         for key in STYLES:
@@ -1036,7 +1037,7 @@ class SettingsPage(QWidget):
             self.style_group.addButton(c)
             self.style_cards[key] = c
             cards.addWidget(c)
-        dv.addLayout(cards)
+        dv.addWidget(cards_host)
         sec.addWidget(design)
         sec.addWidget(separator())
         self.overlay_sliders = {
@@ -1423,12 +1424,12 @@ class MainWindow(QMainWindow):
         restyle(self)
         self.settings.set_theme_selection(self.ctl.settings.ui_theme)
         if self.isVisible():
-            T.apply_dark_titlebar(int(self.winId()))
+            T.apply_titlebar(int(self.winId()))
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         if not self._titlebar_done:
-            T.apply_dark_titlebar(int(self.winId()))
+            T.apply_titlebar(int(self.winId()))
             self._titlebar_done = True
 
     def closeEvent(self, event: QCloseEvent) -> None:
